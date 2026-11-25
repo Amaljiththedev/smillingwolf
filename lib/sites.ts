@@ -40,9 +40,54 @@ export const DEMO_SITES: Site[] = [
     status: "live",
     brand: { accent: "#c2c698", logoText: "Millbrook Yards" },
     blocks: [
-      { id: "b1", kind: "header", props: { title: "Millbrook Yards" } },
-      { id: "b2", kind: "map", props: { title: "The masterplan" } },
-      { id: "b3", kind: "survey", props: { question: "How would you travel to the new park?" } },
+      {
+        id: "mb-header",
+        kind: "header",
+        props: {
+          title: "Millbrook Yards",
+          links: ["Overview", "The masterplan", "Have your say"],
+          animation: "fade",
+        },
+      },
+      {
+        id: "mb-hero",
+        kind: "hero",
+        props: {
+          eyebrow: "Public consultation",
+          title: "Have your say on Millbrook Yards",
+          body: "We are proposing new homes, workspace and a riverside park on the former yards. Tell us what you think before the consultation closes.",
+          cta: "Take the survey",
+          animation: "rise",
+        },
+      },
+      {
+        id: "mb-map",
+        kind: "map",
+        props: {
+          title: "The masterplan",
+          caption: "Drop a pin to comment on a specific spot.",
+          pins: "4",
+          animation: "scale",
+        },
+      },
+      {
+        id: "mb-survey",
+        kind: "survey",
+        props: {
+          question: "How would you travel to the new park?",
+          answers: ["Walk", "Cycle", "Bus", "Car"],
+          animation: "rise",
+        },
+      },
+      {
+        id: "mb-footer",
+        kind: "footer",
+        props: {
+          contact: "consultation@millbrookyards.co.uk",
+          note: "This consultation closes on 31 March.",
+          animation: "fade",
+        },
+      },
     ],
     updatedAt: "2026-11-24",
   },
@@ -52,7 +97,26 @@ export const DEMO_SITES: Site[] = [
     domain: "stationquarter.example.gov.uk",
     status: "draft",
     brand: { accent: "#bfe9ff", logoText: "Station Quarter" },
-    blocks: [{ id: "b1", kind: "header", props: { title: "Station Quarter" } }],
+    blocks: [
+      {
+        id: "sq-header",
+        kind: "header",
+        props: {
+          title: "Station Quarter",
+          links: ["Overview", "Have your say"],
+          animation: "fade",
+        },
+      },
+      {
+        id: "sq-text",
+        kind: "text",
+        props: {
+          title: "About the proposals",
+          body: "Early thinking for the land around the station. This page is a draft and is not published yet.",
+          animation: "rise",
+        },
+      },
+    ],
     updatedAt: "2026-11-21",
   },
 ];
