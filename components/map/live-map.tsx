@@ -101,6 +101,7 @@ export function LiveMap({
   outline,
   findOutlineAt,
   onOutlineFound,
+  outlineColour = "#ff8c88",
   lines,
   labels = [],
   overlay,
@@ -130,6 +131,8 @@ export function LiveMap({
   findOutlineAt?: [number, number];
   /** Told the boundary found at findOutlineAt (or null), e.g. to place comment pins inside it. */
   onOutlineFound?: (outline: [number, number][] | null) => void;
+  /** The boundary's colour, usually the page's accent. */
+  outlineColour?: string;
   /** Lines drawn from the map data (paths, roads, buildings...), and whether each shows. */
   lines?: Partial<Record<LineKey, boolean>>;
   labels?: MapLabel[];
@@ -370,7 +373,7 @@ export function LiveMap({
     if (!ready || !map || !styleReady.current) return;
     const outline = shownOutline;
     if (!area && !outline?.length) {
-      for (const id of ["op-area-line", "op-area-casing", "op-area-fill", "op-area-mask"]) if (map.getLayer(id)) map.removeLayer(id);
+      for (const id of ["op-area-line", "op-area-band", "op-area-casing", "op-area-fill", "op-area-mask"]) if (map.getLayer(id)) map.removeLayer(id);
       for (const id of ["op-area", "op-area-mask"]) if (map.getSource(id)) map.removeSource(id);
       return;
     }
@@ -408,32 +411,51 @@ export function LiveMap({
       },
     };
     const spotlit = Boolean(outline?.length);
+    /* The page passes its accent as a CSS variable; the map needs the colour itself. */
+    const variable = /^var\((--[\w-]+)\)$/.exec(outlineColour.trim());
+    const colour = (variable && box.current ? getComputedStyle(box.current).getPropertyValue(variable[1]).trim() : outlineColour) || "#ff8c88";
     const source = map.getSource("op-area");
     if (source && "setData" in source) {
       (source as unknown as { setData: (d: typeof data) => void }).setData(data);
       const maskSource = map.getSource("op-area-mask");
       if (maskSource && "setData" in maskSource) (maskSource as unknown as { setData: (d: typeof mask) => void }).setData(mask);
       if (map.getLayer("op-area-mask")) map.setLayoutProperty("op-area-mask", "visibility", spotlit ? "visible" : "none");
+      if (map.getLayer("op-area-band")) map.setPaintProperty("op-area-band", "line-color", colour);
+      if (map.getLayer("op-area-fill")) map.setPaintProperty("op-area-fill", "fill-color", colour);
       return;
     }
+    /*
+      A friendly boundary: the world outside softly hazed, a light tint of the
+      page's colour inside, and a rounded band in that colour with a soft glow
+      and a fine dark edge so pale colours still read on the map.
+    */
     const before = firstLabelLayer(map);
+    const round = { "line-join": "round" as const, "line-cap": "round" as const };
     map.addSource("op-area-mask", { type: "geojson", data: mask });
     map.addLayer(
-      { id: "op-area-mask", type: "fill", source: "op-area-mask", layout: { visibility: spotlit ? "visible" : "none" }, paint: { "fill-color": "#1a1c19", "fill-opacity": 0.34 } },
+      { id: "op-area-mask", type: "fill", source: "op-area-mask", layout: { visibility: spotlit ? "visible" : "none" }, paint: { "fill-color": "#ffffff", "fill-opacity": 0.42 } },
       before,
     );
     map.addSource("op-area", { type: "geojson", data });
-    map.addLayer({ id: "op-area-fill", type: "fill", source: "op-area", paint: { "fill-color": "#ffffff", "fill-opacity": 0.06 } }, before);
-    map.addLayer({ id: "op-area-casing", type: "line", source: "op-area", paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 } });
+    map.addLayer({ id: "op-area-fill", type: "fill", source: "op-area", paint: { "fill-color": colour, "fill-opacity": 0.12 } }, before);
+    map.addLayer({
+      id: "op-area-casing",
+      type: "line",
+      source: "op-area",
+      layout: round,
+      paint: { "line-color": "#ffffff", "line-width": 11, "line-blur": 4, "line-opacity": 0.85 },
+    });
+    map.addLayer({ id: "op-area-band", type: "line", source: "op-area", layout: round, paint: { "line-color": colour, "line-width": 5, "line-opacity": 0.95 } });
     map.addLayer({
       id: "op-area-line",
       type: "line",
       source: "op-area",
-      paint: { "line-color": "#e5484d", "line-width": 3, "line-dasharray": [2.4, 1.4] },
+      layout: round,
+      paint: { "line-color": "#131713", "line-width": 1, "line-opacity": 0.55 },
     });
     // The outline is compared by content (shownKey): a fresh array each render must not redraw.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, styleVersion, area, shownKey]);
+  }, [ready, styleVersion, area, shownKey, outlineColour]);
 
   /* Lines drawn from the map data, over the base map and under the plan drawing and names. */
   const linesKey = JSON.stringify(lines ?? null);

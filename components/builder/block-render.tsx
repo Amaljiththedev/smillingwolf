@@ -856,6 +856,7 @@ function MapBlock({ props, accent, editing }: BlockProps) {
           outline={outline}
           findOutlineAt={site?.ref && siteRefAt ? [siteRefAt[1], siteRefAt[0]] : undefined}
           onOutlineFound={setFound}
+          outlineColour={accent}
           lines={lines}
           fit={footprint ? pad(footprint, 0.08) : undefined}
           reach={reach}

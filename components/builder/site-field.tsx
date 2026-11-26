@@ -1,7 +1,7 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
+import type { FilterSpecification, GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
 import { Check, MousePointerClick, PenLine, SquareDashed, Undo2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { GridInput } from "@/components/builder/plan-field";
@@ -164,15 +164,18 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
         const before = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
         for (const key of ["green", "water", "roads", "buildings", "paths"] as LineKey[]) for (const layer of lineLayers(key)) map.addLayer(layer, before);
         map.addSource("draft", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addLayer({ id: "draft-fill", type: "fill", source: "draft", filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": "#ff8c88", "fill-opacity": 0.18 } });
-        map.addLayer({ id: "draft-casing", type: "line", source: "draft", filter: ["!=", ["geometry-type"], "Point"], paint: { "line-color": "#ffffff", "line-width": 5 } });
-        map.addLayer({ id: "draft-line", type: "line", source: "draft", filter: ["!=", ["geometry-type"], "Point"], paint: { "line-color": "#e5484d", "line-width": 2.4, "line-dasharray": [2, 1.4] } });
+        const round = { "line-join": "round" as const, "line-cap": "round" as const };
+        const edges: FilterSpecification = ["!=", ["geometry-type"], "Point"];
+        map.addLayer({ id: "draft-fill", type: "fill", source: "draft", filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": "#ff8c88", "fill-opacity": 0.14 } });
+        map.addLayer({ id: "draft-casing", type: "line", source: "draft", filter: edges, layout: round, paint: { "line-color": "#ffffff", "line-width": 11, "line-blur": 4, "line-opacity": 0.85 } });
+        map.addLayer({ id: "draft-band", type: "line", source: "draft", filter: edges, layout: round, paint: { "line-color": "#ff8c88", "line-width": 5 } });
+        map.addLayer({ id: "draft-line", type: "line", source: "draft", filter: edges, layout: round, paint: { "line-color": "#131713", "line-width": 1, "line-opacity": 0.55 } });
         map.addLayer({
           id: "draft-points",
           type: "circle",
           source: "draft",
           filter: ["==", ["geometry-type"], "Point"],
-          paint: { "circle-radius": 4.5, "circle-color": "#ffffff", "circle-stroke-color": "#e5484d", "circle-stroke-width": 2 },
+          paint: { "circle-radius": 4.5, "circle-color": "#ffffff", "circle-stroke-color": "#131713", "circle-stroke-width": 2 },
         });
         const box0 = outlineBounds(site.outline);
         if (box0) map.fitBounds([[box0.west, box0.south], [box0.east, box0.north]], { padding: 60, duration: 0, maxZoom: 18 });
