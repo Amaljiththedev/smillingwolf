@@ -7,6 +7,7 @@ import { useId, useRef, useState, useTransition } from "react";
 import { Odometer } from "@/components/ui/odometer";
 import { loadDashboard } from "@/lib/actions/dashboard";
 import {
+  DOWNLOADS,
   REACTION_COLOURS,
   SCALE_COLOURS,
   type DashboardData,
@@ -390,11 +391,7 @@ function DateField({ name, label, defaultValue }: { name: string; label: string;
 
 function ExportMenu({ base, range }: { base: string; range: Range }) {
   const [open, setOpen] = useState(false);
-  const items = [
-    { type: "responses", label: "Questionnaire answers" },
-    { type: "comments", label: "Comments" },
-    { type: "reactions", label: "Quick reactions" },
-  ];
+  const items = DOWNLOADS;
   return (
     <div
       className="relative"
@@ -418,7 +415,7 @@ function ExportMenu({ base, range }: { base: string; range: Range }) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.18, ease: EASE_OUT }}
-            className="absolute right-0 z-30 mt-1.5 w-56 origin-top-right rounded-sw border border-ink/10 bg-white p-1 shadow-[0_18px_40px_-20px_rgba(19,23,19,0.45)]"
+            className="absolute right-0 z-30 mt-1.5 w-64 origin-top-right rounded-sw border border-ink/10 bg-white p-1 shadow-[0_18px_40px_-20px_rgba(19,23,19,0.45)]"
           >
             {items.map((item) => (
               <li key={item.type}>
@@ -428,7 +425,8 @@ function ExportMenu({ base, range }: { base: string; range: Range }) {
                   onClick={() => setOpen(false)}
                   className="block rounded-[3px] px-2.5 py-2 text-[0.85rem] text-ink transition-colors hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-ink"
                 >
-                  {item.label}
+                  <span className="block">{item.label}</span>
+                  <span className="block text-[0.72rem] text-ink/50">{item.note}</span>
                 </a>
               </li>
             ))}

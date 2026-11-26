@@ -1,10 +1,11 @@
+import { Download, FileSpreadsheet } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { TopBar } from "@/components/builder/top-bar";
 import { PrintButton } from "@/components/dashboard/print-button";
 import { SiteNav } from "@/components/dashboard/site-nav";
 import { WordPressNotice } from "@/components/dashboard/wordpress-notice";
 import { getSession } from "@/lib/auth";
-import { cleanRange, type DashboardData } from "@/lib/consultation";
+import { DOWNLOADS, cleanRange, type DashboardData, type Range } from "@/lib/consultation";
 import { getSite } from "@/lib/sites";
 import { WordPressError, getDashboard } from "@/lib/wordpress";
 
@@ -52,13 +53,13 @@ export default async function ReportPage({
         </TopBar>
       </div>
       <main className="min-h-[calc(100svh-3.5rem)] bg-paper py-8 print:bg-white print:py-0">
-        {data ? <Report data={data} range={range} /> : <WordPressNotice message={error ?? ""} />}
+        {data ? <Report data={data} range={range} siteId={site.id} /> : <WordPressNotice message={error ?? ""} />}
       </main>
     </>
   );
 }
 
-function Report({ data, range }: { data: DashboardData; range: { from?: string; to?: string } }) {
+function Report({ data, range, siteId }: { data: DashboardData; range: Range; siteId: string }) {
   const s = data.summary;
   const period =
     range.from || range.to
@@ -84,6 +85,8 @@ function Report({ data, range }: { data: DashboardData; range: { from?: string; 
         </div>
         <PrintButton />
       </header>
+
+      <Downloads siteId={siteId} range={range} />
 
       <section className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-sw border border-ink/10 bg-ink/10 md:auto-cols-fr md:grid-flow-col md:grid-cols-none print:auto-cols-fr print:grid-flow-col print:grid-cols-none">
         {tiles.map(([label, value]) => (
@@ -206,6 +209,44 @@ function Report({ data, range }: { data: DashboardData; range: { from?: string; 
         Example data
       </p>
     </article>
+  );
+}
+
+/** Everything in the report, and more, as spreadsheets. Not printed. */
+function Downloads({ siteId, range }: { siteId: string; range: Range }) {
+  const q = new URLSearchParams();
+  if (range.from) q.set("from", range.from);
+  if (range.to) q.set("to", range.to);
+  const suffix = q.toString() ? `?${q}` : "";
+  return (
+    <section aria-labelledby="downloads" className="mt-6 rounded-sw border border-ink/10 bg-paper/60 p-4 md:p-5 print:hidden">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="downloads" className="text-[1rem] font-medium tracking-[-0.01em]">
+          Download the data
+        </h2>
+        <p className="text-[0.78rem] text-ink/55">CSV files, open in Excel or Google Sheets. Same dates as this report.</p>
+      </div>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        {DOWNLOADS.map((item) => (
+          <li key={item.type}>
+            <a
+              href={`/builder/${siteId}/export/${item.type}${suffix}`}
+              download
+              className="group flex items-center gap-3 rounded-sw border border-ink/10 bg-white px-3 py-2.5 transition-[border-color,box-shadow] duration-200 hover:border-ink/30 hover:shadow-[0_10px_24px_-18px_rgba(19,23,19,0.45)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-sw bg-lime/70">
+                <FileSpreadsheet className="size-4" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[0.86rem] font-medium leading-tight">{item.label}</span>
+                <span className="block truncate text-[0.74rem] text-ink/55">{item.note}</span>
+              </span>
+              <Download className="size-4 shrink-0 text-ink/35 transition-colors group-hover:text-ink" aria-hidden="true" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
