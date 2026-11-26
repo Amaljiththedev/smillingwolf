@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { FilterSpecification, GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
-import { Check, MousePointerClick, PenLine, SquareDashed, Undo2, X } from "lucide-react";
+import { Check, Lasso, MousePointerClick, SquareDashed, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { GridInput } from "@/components/builder/plan-field";
 import { buildStyle, hasAerial } from "@/lib/map-styles";
@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
   Inspector control for the scheme's site:
   - its OS grid reference (where the map opens),
   - its boundary: click an area on the map and the outline is taken from the
-    map data (click again for the next bigger area), or draw it point by point,
+    map data (click again for the next bigger area), or lasso it freehand,
   - which lines are drawn from the map data.
 */
 
@@ -120,8 +120,38 @@ const SWATCH: Record<LineKey, string> = {
 
 /* ---------- The boundary map ---------- */
 
-type Mode = "pick" | "draw";
+type Mode = "pick" | "lasso";
 type Ring = [number, number][];
+type Px = { x: number; y: number };
+
+/* Douglas-Peucker on screen points: keeps the corners, drops the wobble. */
+function simplifyPath(points: Px[], tolerance: number): number[] {
+  if (points.length < 3) return points.map((_, i) => i);
+  const keep = new Set([0, points.length - 1]);
+  const stack: [number, number][] = [[0, points.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const pa = points[a];
+    const pb = points[b];
+    const dx = pb.x - pa.x;
+    const dy = pb.y - pa.y;
+    const len = Math.hypot(dx, dy);
+    let worst = -1;
+    let far = 0;
+    for (let i = a + 1; i < b; i++) {
+      const d = len ? Math.abs(dy * (points[i].x - pa.x) - dx * (points[i].y - pa.y)) / len : Math.hypot(points[i].x - pa.x, points[i].y - pa.y);
+      if (d > far) {
+        far = d;
+        worst = i;
+      }
+    }
+    if (worst > 0 && far > tolerance) {
+      keep.add(worst);
+      stack.push([a, worst], [worst, b]);
+    }
+  }
+  return [...keep].sort((x, y) => x - y);
+}
 
 function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: () => void; onSave: (outline: Ring) => void }) {
   const box = useRef<HTMLDivElement>(null);
@@ -150,6 +180,7 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
   /* Build the map once. */
   useEffect(() => {
     let cancelled = false;
+    let stopLasso = () => {};
     (async () => {
       const [lib, style] = await Promise.all([import("maplibre-gl"), buildStyle(hasAerial ? "aerial" : "streets")]);
       if (cancelled || !box.current) return;
@@ -170,13 +201,6 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
         map.addLayer({ id: "draft-casing", type: "line", source: "draft", filter: edges, layout: round, paint: { "line-color": "#ffffff", "line-width": 11, "line-blur": 4, "line-opacity": 0.85 } });
         map.addLayer({ id: "draft-band", type: "line", source: "draft", filter: edges, layout: round, paint: { "line-color": "#ff8c88", "line-width": 5 } });
         map.addLayer({ id: "draft-line", type: "line", source: "draft", filter: edges, layout: round, paint: { "line-color": "#131713", "line-width": 1, "line-opacity": 0.55 } });
-        map.addLayer({
-          id: "draft-points",
-          type: "circle",
-          source: "draft",
-          filter: ["==", ["geometry-type"], "Point"],
-          paint: { "circle-radius": 4.5, "circle-color": "#ffffff", "circle-stroke-color": "#131713", "circle-stroke-width": 2 },
-        });
         const box0 = outlineBounds(site.outline);
         if (box0) map.fitBounds([[box0.west, box0.south], [box0.east, box0.north]], { padding: 60, duration: 0, maxZoom: 18 });
         setReady(true);
@@ -185,11 +209,11 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
           map.once("idle", () => {
             const found = findSiteShape(map, [lng, lat]);
             if (!found) {
-              setNote("No area found at the grid reference. Click the site, or draw it by hand.");
+              setNote("No area found at the grid reference. Click the site, or use the lasso to draw round it.");
               return;
             }
             setOutline(found);
-            setNote("Found at the grid reference. Click elsewhere to pick a different area, or draw it by hand.");
+            setNote("Found at the grid reference. Click elsewhere to pick a different area, or use the lasso to draw round it.");
             const b = outlineBounds(found);
             if (b) map.fitBounds([[b.west, b.south], [b.east, b.north]], { padding: 60, maxZoom: 18 });
           });
@@ -197,14 +221,11 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
       });
 
       map.on("click", (event) => {
+        if (live.current.mode === "lasso") return;
         const at: [number, number] = [event.lngLat.lng, event.lngLat.lat];
-        if (live.current.mode === "draw") {
-          setDrawing((points) => [...points, at]);
-          return;
-        }
         const shapes = areasAt(map, at);
         if (!shapes.length) {
-          setNote("Nothing to pick there. Try clicking inside a field, plot or building, or draw the boundary by hand.");
+          setNote("Nothing to pick there. Try clicking inside a field, plot or building, or use the lasso.");
           return;
         }
         const last = lastPick.current;
@@ -215,22 +236,54 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
         setNote(
           shapes.length > 1
             ? `Picked shape ${index + 1} of ${shapes.length} here. Click the same spot again for the next bigger one.`
-            : "Picked. If it is cut off, draw the boundary by hand instead.",
+            : "Picked. If it is cut off, use the lasso to draw round it instead.",
         );
       });
-      /* A double-click closes the shape (its two clicks have added the same point twice). */
-      map.on("dblclick", () => {
-        if (live.current.mode !== "draw") return;
-        setDrawing((points) => {
-          const clean = points.filter((p, i) => i === 0 || Math.hypot(p[0] - points[i - 1][0], p[1] - points[i - 1][1]) > 1e-7);
-          if (clean.length < 3) return clean;
-          setOutline(clean);
-          return [];
-        });
+
+      /* Lasso: press, drag round the site, let go. The path closes itself. */
+      let path: Px[] | null = null;
+      const toRing = (points: Px[]): Ring => points.map((p) => map.unproject([p.x, p.y]).toArray() as [number, number]);
+      const begin = (at: Px) => {
+        if (live.current.mode !== "lasso") return;
+        path = [at];
+        setDrawing(toRing(path));
+      };
+      const extend = (at: Px) => {
+        if (!path) return;
+        const last = path[path.length - 1];
+        if (Math.hypot(at.x - last.x, at.y - last.y) < 4) return;
+        path.push(at);
+        setDrawing(toRing(path));
+      };
+      const finish = () => {
+        if (!path) return;
+        const points = path;
+        path = null;
+        setDrawing([]);
+        const kept = simplifyPath(points, 2).map((i) => points[i]);
+        if (kept.length < 3 || outlineArea(toRing(kept)) < 50) {
+          setNote("Hold the mouse down and drag all the way round the site, then let go.");
+          return;
+        }
+        setOutline(toRing(kept));
+        setNote("Drawn. Drag round again to redo it, or press Use this boundary.");
+      };
+      map.on("mousedown", (event) => {
+        if (event.originalEvent.button === 0) begin(event.point);
       });
+      map.on("mousemove", (event) => extend(event.point));
+      map.on("touchstart", (event) => {
+        if (event.points.length === 1) begin(event.point);
+      });
+      map.on("touchmove", (event) => extend(event.point));
+      map.on("touchend", finish);
+      /* Letting go outside the map still closes the lasso. */
+      window.addEventListener("mouseup", finish);
+      stopLasso = () => window.removeEventListener("mouseup", finish);
     })();
     return () => {
       cancelled = true;
+      stopLasso();
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -238,26 +291,27 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Show the outline (or the one being drawn). */
+  /* With the lasso on, dragging draws instead of moving the map (zoom still works). */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    if (mode === "lasso") map.dragPan.disable();
+    else map.dragPan.enable();
+  }, [mode, ready]);
+
+  /* Show the outline, or the lasso as it is drawn (closed back to the start). */
   useEffect(() => {
     const source = mapRef.current?.getSource("draft") as GeoJSONSource | undefined;
     if (!ready || !source) return;
     const shape = drawing.length ? drawing : outline;
-    const closed = !drawing.length && shape.length >= 3;
     source.setData({
       type: "FeatureCollection",
-      features: [
-        ...(shape.length >= 2
-          ? [
-              closed
-                ? { type: "Feature" as const, properties: {}, geometry: { type: "Polygon" as const, coordinates: [[...shape, shape[0]]] } }
-                : { type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: shape } },
-            ]
-          : []),
-        ...(drawing.length || shape.length < 60
-          ? shape.map((p) => ({ type: "Feature" as const, properties: {}, geometry: { type: "Point" as const, coordinates: p } }))
-          : []),
-      ],
+      features:
+        shape.length >= 3
+          ? [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[...shape, shape[0]]] } }]
+          : shape.length === 2
+            ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: shape } }]
+            : [],
     });
   }, [outline, drawing, ready]);
 
@@ -267,7 +321,7 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-ink/50 p-3 backdrop-blur-[2px] md:p-6" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className="flex h-full max-h-[52rem] w-full max-w-[84rem] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl md:flex-row">
         <div className="relative min-h-[18rem] flex-1 bg-paper">
-          <div ref={box} style={{ position: "absolute", inset: 0 }} className={mode === "draw" ? "[&_canvas]:cursor-crosshair" : "[&_canvas]:cursor-pointer"} />
+          <div ref={box} style={{ position: "absolute", inset: 0 }} className={mode === "lasso" ? "[&_canvas]:!cursor-crosshair" : "[&_canvas]:cursor-pointer"} />
           {!ready && <p className="absolute inset-0 grid place-items-center text-[0.75rem] text-ink/50">Loading map</p>}
         </div>
 
@@ -290,7 +344,7 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
             {(
               [
                 ["pick", "Pick from the map", MousePointerClick],
-                ["draw", "Draw by hand", PenLine],
+                ["lasso", "Lasso", Lasso],
               ] as const
             ).map(([key, label, Icon]) => (
               <button
@@ -317,33 +371,8 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
           <p className="text-[0.76rem] leading-snug text-ink/65">
             {mode === "pick"
               ? "Click inside the site: a field, plot, park or building. Its outline comes from the map data."
-              : "Click each corner of the site in turn. Double-click, or press Finish, to close the shape."}
+              : "Hold the mouse down and drag round the site, then let go. The shape closes itself. Scroll to zoom; switch to Pick to move the map."}
           </p>
-
-          {mode === "draw" && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={!drawing.length}
-                onClick={() => setDrawing((points) => points.slice(0, -1))}
-                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-sw border border-ink/15 text-[0.76rem] text-ink hover:bg-ink/5 disabled:opacity-40"
-              >
-                <Undo2 className="size-3.5" aria-hidden="true" />
-                Undo point
-              </button>
-              <button
-                type="button"
-                disabled={drawing.length < 3}
-                onClick={() => {
-                  setOutline(drawing);
-                  setDrawing([]);
-                }}
-                className="h-8 flex-1 rounded-sw bg-ink text-[0.76rem] font-medium text-white hover:opacity-90 disabled:opacity-40"
-              >
-                Finish ({drawing.length} points)
-              </button>
-            </div>
-          )}
 
           {note && <p className="rounded-sw bg-paper px-2.5 py-2 text-[0.74rem] leading-snug text-ink/70">{note}</p>}
 
