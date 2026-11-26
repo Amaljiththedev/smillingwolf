@@ -31,10 +31,9 @@ import {
 } from "@/lib/blocks";
 import { EASE_OUT } from "@/lib/motion";
 import type { Block } from "@/lib/sites";
-import { LiveMap, glass, type Corners } from "@/components/map/live-map";
-import { demoPins, pad, planBounds, type Bounds } from "@/lib/geo";
-import { layerImage, planCorners, planId, readPlan } from "@/lib/svg-plan";
-import { DEFAULT_CENTRE, LINE_SETS, outlineBounds, readSite, siteCentre } from "@/lib/site-map";
+import { LiveMap, glass } from "@/components/map/live-map";
+import { demoPins, pad, type Bounds } from "@/lib/geo";
+import { DEFAULT_CENTRE, LINE_SETS, outlineBounds, pinsInside, readSite, siteCentre } from "@/lib/site-map";
 import { isBasemap } from "@/lib/map-styles";
 import { cn } from "@/lib/utils";
 
@@ -809,36 +808,20 @@ function Contact({ props, accent }: BlockProps) {
 /* ---------- Engagement ---------- */
 
 
-/* A real street map with comment pins. Still in the editor so dragging the page never pans it.
-   With a layered masterplan, the drawing sits on the map at its OS grid references and each
-   layer gets a switch. Without grid references it is shown at the scheme's centre. */
+/* A real map with comment pins. Still in the editor so dragging the page never pans it.
+   The site comes from its grid reference: its boundary (marked, or found in the map data)
+   is spotlit, comment pins sit inside it, and paths, roads and buildings are drawn from
+   the map data, each with a switch for visitors. */
 function MapBlock({ props, accent, editing }: BlockProps) {
   const site = readSite(props.site);
   const siteAt = siteCentre(site) ?? DEFAULT_CENTRE;
+  /* The grid reference itself, where an unmarked boundary is looked up. */
+  const siteRefAt = site && !site.outline.length ? siteCentre(site) : null;
   const outline = site?.outline.length ? site.outline : undefined;
-  const plan = readPlan(props.plan);
-  const corners: Corners | null = plan ? planCorners(plan) : null;
-  const planBox: Bounds | null = corners
-    ? {
-        west: Math.min(...corners.map((c) => c[0])),
-        east: Math.max(...corners.map((c) => c[0])),
-        south: Math.min(...corners.map((c) => c[1])),
-        north: Math.max(...corners.map((c) => c[1])),
-      }
-    : plan
-      ? planBounds(siteAt, plan.width, plan.height, 400)
-      : null;
-  /* What the map frames: the site boundary and the plan together. */
-  const siteBox = outline ? outlineBounds(outline) : null;
-  const footprint: Bounds | null =
-    planBox && siteBox
-      ? {
-          west: Math.min(planBox.west, siteBox.west),
-          east: Math.max(planBox.east, siteBox.east),
-          south: Math.min(planBox.south, siteBox.south),
-          north: Math.max(planBox.north, siteBox.north),
-        }
-      : (planBox ?? siteBox);
+  /* A boundary the map found at the grid reference, when none is marked. */
+  const [found, setFound] = useState<[number, number][] | null>(null);
+  const boundary = outline ?? found ?? undefined;
+  const footprint: Bounds | null = outline ? outlineBounds(outline) : null;
   const centre: [number, number] = footprint
     ? [(footprint.north + footprint.south) / 2, (footprint.east + footprint.west) / 2]
     : siteAt;
@@ -846,52 +829,33 @@ function MapBlock({ props, accent, editing }: BlockProps) {
   /* Visitors' own layer choices, on top of the defaults set in the editor. */
   const [switched, setSwitched] = useState<Record<string, boolean>>({});
   const [layersOpen, setLayersOpen] = useState<boolean | null>(null);
-  const id = plan ? planId(plan) : "";
-  const isOn = (key: string, fallback: boolean) => (editing ? fallback : (switched[`${id}:${key}`] ?? fallback));
+  const isOn = (key: string, fallback: boolean) => (editing ? fallback : (switched[key] ?? fallback));
 
   const pinCount = Number(readText(props, "pins", "4")) || 0;
-  const pins = demoPins(centre, pinCount);
+  /* Comments belong to the site, so the pins sit inside its boundary. */
+  const pins = boundary ? pinsInside(boundary, pinCount) : demoPins(centre, pinCount);
   const reach = readText(props, "reach", "site") === "wide" ? "wide" : "site";
 
-  /* Everything a visitor can switch: the plan's layers, then the lines from the map data. */
-  const switches = [
-    ...(plan?.layers.map((layer) => ({ id: layer.key, label: layer.label, on: isOn(layer.key, layer.on) })) ?? []),
-    ...(site
-      ? LINE_SETS.filter((set) => site.lines.includes(set.key)).map((set) => ({ id: `lines:${set.key}`, label: set.label, on: isOn(`lines:${set.key}`, true) }))
-      : []),
-  ];
-  const lines = site
-    ? Object.fromEntries(site.lines.map((key) => [key, isOn(`lines:${key}`, true)]))
-    : undefined;
-
-  const overlay =
-    plan && planBox
-      ? {
-          images: plan.layers.map((layer) => ({
-            key: `${id}-${layer.key}`,
-            url: layerImage(plan, layer.key),
-            visible: isOn(layer.key, layer.on),
-          })),
-          bounds: planBox ?? footprint,
-          aspect: plan.height / plan.width,
-          corners: corners ?? undefined,
-        }
-      : undefined;
+  /* The lines from the map data, each with a switch. */
+  const switches = site
+    ? LINE_SETS.filter((set) => site.lines.includes(set.key)).map((set) => ({ id: `lines:${set.key}`, label: set.label, on: isOn(`lines:${set.key}`, true) }))
+    : [];
+  const lines = site ? Object.fromEntries(site.lines.map((key) => [key, isOn(`lines:${key}`, true)])) : undefined;
 
   return (
     <div className={section}>
       <div className={inner}>
         <Heading>{readText(props, "title")}</Heading>
         <LiveMap
-          /* A new plan or a new position starts a fresh map, framed on the plan. */
-          key={`${id}|${corners ? `${corners[0].join()}|${corners[2].join()}` : "unplaced"}|${footprint ? [footprint.west, footprint.north].join() : siteAt.join()}`}
+          /* A new site or boundary starts a fresh map, framed on it. */
+          key={footprint ? [footprint.west, footprint.north, footprint.east, footprint.south].join() : siteAt.join()}
           still={editing}
           centre={centre}
           zoom={16.2}
           pins={pins}
-          overlay={overlay}
-          overlayOpacity={0.92}
           outline={outline}
+          findOutlineAt={site?.ref && siteRefAt ? [siteRefAt[1], siteRefAt[0]] : undefined}
+          onOutlineFound={setFound}
           lines={lines}
           fit={footprint ? pad(footprint, 0.08) : undefined}
           reach={reach}
@@ -922,7 +886,7 @@ function MapBlock({ props, accent, editing }: BlockProps) {
                 }}
                 className="flex w-full items-center justify-between gap-3 px-3 py-2 text-[0.72rem] font-medium uppercase tracking-[0.08em] text-ink/70 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink"
               >
-                {plan ? "Plan layers" : "Map layers"}
+                Map layers
                 <span aria-hidden="true" className={cn("transition-transform duration-200", layersOpen === null ? "@max-lg:-rotate-90" : !layersOpen && "-rotate-90")}>
                   ▾
                 </span>
@@ -940,7 +904,7 @@ function MapBlock({ props, accent, editing }: BlockProps) {
                         onClick={(event) => {
                           if (editing) return;
                           event.stopPropagation();
-                          setSwitched((all) => ({ ...all, [`${id}:${layer.id}`]: !on }));
+                          setSwitched((all) => ({ ...all, [layer.id]: !on }));
                         }}
                         className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left text-[0.78rem] text-ink transition-colors hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-ink"
                       >

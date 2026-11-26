@@ -571,13 +571,7 @@ export const BLOCK_DEFINITIONS: readonly BlockDefinition[] = [
         key: "site",
         label: "Site",
         type: "site",
-        help: "Where the scheme is. The map opens here, the boundary is highlighted, and paths, roads and buildings are drawn from the map data.",
-      },
-      {
-        key: "plan",
-        label: "Masterplan drawing (optional)",
-        type: "svgplan",
-        help: "For the proposed scheme: a layered SVG from the architects. Each layer (boundary, buildings, landscape and so on) becomes a switch visitors can turn on and off.",
+        help: "Where the scheme is. The map opens here, the boundary is highlighted with the comment pins inside it, and paths, roads and buildings are drawn from the map data.",
       },
       {
         key: "reach",

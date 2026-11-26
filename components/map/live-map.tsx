@@ -6,7 +6,7 @@ import { Box, Compass, Locate, Map as MapIcon, Minus, Mountain, Plus, Satellite 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Bounds } from "@/lib/geo";
 import { BASEMAPS, DEM, buildStyle, type Basemap } from "@/lib/map-styles";
-import { lineLayers, type LineKey } from "@/lib/site-map";
+import { findSiteShape, lineLayers, outlineBounds, type LineKey } from "@/lib/site-map";
 import { cn } from "@/lib/utils";
 
 const DRAW_ORDER: LineKey[] = ["green", "water", "roads", "buildings", "paths"];
@@ -99,6 +99,8 @@ export function LiveMap({
   pins,
   area,
   outline,
+  findOutlineAt,
+  onOutlineFound,
   lines,
   labels = [],
   overlay,
@@ -124,6 +126,10 @@ export function LiveMap({
   area?: Bounds;
   /** The site boundary as [lng, lat] points; drawn instead of the area box. */
   outline?: [number, number][];
+  /** With no outline: find the site's boundary in the map data at this [lng, lat] and show it. */
+  findOutlineAt?: [number, number];
+  /** Told the boundary found at findOutlineAt (or null), e.g. to place comment pins inside it. */
+  onOutlineFound?: (outline: [number, number][] | null) => void;
   /** Lines drawn from the map data (paths, roads, buildings...), and whether each shows. */
   lines?: Partial<Record<LineKey, boolean>>;
   labels?: MapLabel[];
@@ -327,14 +333,45 @@ export function LiveMap({
     }
   }, [reach, ready]);
 
+  /* No boundary marked: take the area at the site's grid reference from the map data. */
+  const [foundOutline, setFoundOutline] = useState<[number, number][] | null>(null);
+  const reportFound = useRef(onOutlineFound);
+  useEffect(() => {
+    reportFound.current = onOutlineFound;
+  });
+  const findKey = outline?.length ? "" : (findOutlineAt?.join() ?? "");
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !findKey) return;
+    const [lng, lat] = findKey.split(",").map(Number);
+    let cancelled = false;
+    const look = () => {
+      if (cancelled) return;
+      const found = findSiteShape(map, [lng, lat]);
+      setFoundOutline(found);
+      reportFound.current?.(found);
+      const b = found && outlineBounds(found);
+      if (b && !still) map.fitBounds([[b.west, b.south], [b.east, b.north]], { padding: 48, maxZoom: 18, duration: 600 });
+      else if (b) map.fitBounds([[b.west, b.south], [b.east, b.north]], { padding: 24, maxZoom: 18, duration: 0 });
+    };
+    if (map.loaded() && map.areTilesLoaded()) look();
+    else map.once("idle", look);
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, findKey, still]);
+  const shownOutline = outline?.length ? outline : findKey ? (foundOutline ?? undefined) : undefined;
+  const shownKey = JSON.stringify(shownOutline ?? null);
+
   /* The scheme footprint: faint fill under the names, and a white-cased coral
      dashed line on top of everything so roads and buildings never hide it. */
   useEffect(() => {
     const map = mapRef.current;
     if (!ready || !map || !styleReady.current) return;
+    const outline = shownOutline;
     if (!area && !outline?.length) {
-      for (const id of ["op-area-line", "op-area-casing", "op-area-fill"]) if (map.getLayer(id)) map.removeLayer(id);
-      if (map.getSource("op-area")) map.removeSource("op-area");
+      for (const id of ["op-area-line", "op-area-casing", "op-area-fill", "op-area-mask"]) if (map.getLayer(id)) map.removeLayer(id);
+      for (const id of ["op-area", "op-area-mask"]) if (map.getSource(id)) map.removeSource(id);
       return;
     }
     const ring = outline?.length
@@ -351,28 +388,52 @@ export function LiveMap({
       properties: {},
       geometry: { type: "Polygon" as const, coordinates: [ring] },
     };
+    /* A boundary is spotlit: a soft veil over everything outside it. */
+    const [cx, cy] = ring[0];
+    const mask = {
+      type: "Feature" as const,
+      properties: {},
+      geometry: {
+        type: "Polygon" as const,
+        coordinates: [
+          [
+            [cx - 10, cy - 10],
+            [cx + 10, cy - 10],
+            [cx + 10, cy + 10],
+            [cx - 10, cy + 10],
+            [cx - 10, cy - 10],
+          ],
+          ring,
+        ],
+      },
+    };
+    const spotlit = Boolean(outline?.length);
     const source = map.getSource("op-area");
     if (source && "setData" in source) {
       (source as unknown as { setData: (d: typeof data) => void }).setData(data);
+      const maskSource = map.getSource("op-area-mask");
+      if (maskSource && "setData" in maskSource) (maskSource as unknown as { setData: (d: typeof mask) => void }).setData(mask);
+      if (map.getLayer("op-area-mask")) map.setLayoutProperty("op-area-mask", "visibility", spotlit ? "visible" : "none");
       return;
     }
     const before = firstLabelLayer(map);
+    map.addSource("op-area-mask", { type: "geojson", data: mask });
+    map.addLayer(
+      { id: "op-area-mask", type: "fill", source: "op-area-mask", layout: { visibility: spotlit ? "visible" : "none" }, paint: { "fill-color": "#1a1c19", "fill-opacity": 0.34 } },
+      before,
+    );
     map.addSource("op-area", { type: "geojson", data });
-    map.addLayer({ id: "op-area-fill", type: "fill", source: "op-area", paint: { "fill-color": "#ff8c88", "fill-opacity": 0.08 } }, before);
-    map.addLayer(
-      { id: "op-area-casing", type: "line", source: "op-area", paint: { "line-color": "#ffffff", "line-width": 4.5, "line-opacity": 0.85 } },
-    );
-    map.addLayer(
-      {
-        id: "op-area-line",
-        type: "line",
-        source: "op-area",
-        paint: { "line-color": "#ff6b66", "line-width": 2.2, "line-dasharray": [2.2, 1.6] },
-      },
-    );
-    // outline is compared by content: a fresh array each render must not redraw.
+    map.addLayer({ id: "op-area-fill", type: "fill", source: "op-area", paint: { "fill-color": "#ffffff", "fill-opacity": 0.06 } }, before);
+    map.addLayer({ id: "op-area-casing", type: "line", source: "op-area", paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 } });
+    map.addLayer({
+      id: "op-area-line",
+      type: "line",
+      source: "op-area",
+      paint: { "line-color": "#e5484d", "line-width": 3, "line-dasharray": [2.4, 1.4] },
+    });
+    // The outline is compared by content (shownKey): a fresh array each render must not redraw.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, styleVersion, area, JSON.stringify(outline ?? null)]);
+  }, [ready, styleVersion, area, shownKey]);
 
   /* Lines drawn from the map data, over the base map and under the plan drawing and names. */
   const linesKey = JSON.stringify(lines ?? null);
@@ -391,7 +452,8 @@ export function LiveMap({
         if (!map.getLayer(layer.id)) {
           const before =
             map.getStyle().layers?.find((l) => l.id.startsWith("overlay-"))?.id ??
-            (map.getLayer("op-area-fill") ? "op-area-fill" : firstLabelLayer(map));
+            ["op-area-mask", "op-area-fill"].find((id) => map.getLayer(id)) ??
+            firstLabelLayer(map);
           map.addLayer(layer, before);
         }
         map.setLayoutProperty(layer.id, "visibility", show ? "visible" : "none");

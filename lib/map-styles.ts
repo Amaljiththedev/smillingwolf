@@ -62,6 +62,29 @@ function load(name: "positron" | "liberty"): Promise<StyleSpecification> {
 }
 
 export async function buildStyle(basemap: Basemap): Promise<StyleSpecification> {
+  return withShapes(await baseStyle(basemap));
+}
+
+/*
+  The map only keeps the kinds of features its style draws. Finding a site's
+  boundary needs land use, parks, green areas, water and buildings, so every
+  base map carries invisible fills for them.
+*/
+function withShapes(style: StyleSpecification): StyleSpecification {
+  if (!style.sources.openmaptiles) return style;
+  const firstLabel = style.layers.findIndex((l) => l.type === "symbol");
+  const shapes: LayerSpecification[] = ["landuse", "landcover", "park", "water", "building"].map((sourceLayer) => ({
+    id: `op-shapes-${sourceLayer}`,
+    type: "fill",
+    source: "openmaptiles",
+    "source-layer": sourceLayer,
+    paint: { "fill-opacity": 0 },
+  }));
+  style.layers.splice(firstLabel === -1 ? style.layers.length : firstLabel, 0, ...shapes);
+  return style;
+}
+
+async function baseStyle(basemap: Basemap): Promise<StyleSpecification> {
   if (basemap === "streets" || (basemap === "aerial" && !hasAerial)) return load("positron");
   if (basemap === "aerial") return aerialStyle();
 

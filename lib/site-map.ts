@@ -1,5 +1,6 @@
 import type { FilterSpecification, LayerSpecification } from "@maplibre/maplibre-gl-style-spec";
 import type { Bounds } from "@/lib/geo";
+import * as clipping from "polygon-clipping";
 import { gridToLatLng, parseGridRef } from "@/lib/osgrid";
 
 /*
@@ -166,3 +167,140 @@ export function lineLayers(key: LineKey): LayerSpecification[] {
 
 /** Shapes a click can pick as the boundary: land use, parks, green areas, water and buildings. */
 export const PICKABLE_LAYERS = ["landuse", "landcover", "park", "water", "building"] as const;
+
+/** Demo comment pins spread inside a boundary, the same every time. */
+export function pinsInside(outline: [number, number][], count: number): { id: string; lng: number; lat: number; tone: "pos" | "neg" | "" }[] {
+  const box = outlineBounds(outline);
+  if (!box || count <= 0) return [];
+  const tones = ["neg", "pos", "", "neg", "pos", ""] as const;
+  const pins: { id: string; lng: number; lat: number; tone: "pos" | "neg" | "" }[] = [];
+  /* An even, scattered sequence over the box (golden-ratio steps), keeping points inside. */
+  for (let i = 1; i < 600 && pins.length < count; i++) {
+    const lng = box.west + (box.east - box.west) * (0.12 + 0.76 * ((i * 0.618034) % 1));
+    const lat = box.south + (box.north - box.south) * (0.12 + 0.76 * ((i * 0.754878) % 1));
+    if (!inRing([lng, lat], outline)) continue;
+    const n = pins.length;
+    pins.push({ id: `demo-${n}`, lng, lat, tone: tones[n % tones.length] });
+  }
+  return pins;
+}
+
+/* ---------- Finding the boundary in the map data ---------- */
+
+/*
+  The map data comes in square tiles, and an area that crosses a tile edge
+  arrives as several pieces. Pieces of the same feature (same id, or the same
+  layer and properties) that touch are joined back together before the
+  outline is taken, so a site is never cut off with a straight tile edge.
+*/
+
+/* Its browser build has only a default export, while its types list named ones. */
+const { union } = ((clipping as unknown as { default?: typeof clipping }).default ?? clipping) as typeof clipping;
+type Pair = clipping.Pair;
+
+type Ring = [number, number][];
+type ShapeFeature = {
+  id?: string | number;
+  sourceLayer?: string;
+  properties?: Record<string, unknown> | null;
+  geometry: { type: string; coordinates?: unknown };
+};
+type Box = [number, number, number, number];
+
+function inRing([x, y]: [number, number], ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonsOf(feature: ShapeFeature): Pair[][][] {
+  const g = feature.geometry;
+  return (g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : []) as Pair[][][];
+}
+
+function boxOf(polygon: Pair[][]): Box {
+  const xs = polygon[0].map((p) => p[0]);
+  const ys = polygon[0].map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+const touches = (a: Box, b: Box, e = 1e-7) => a[0] <= b[2] + e && b[0] <= a[2] + e && a[1] <= b[3] + e && b[1] <= a[3] + e;
+
+/** The outer rings of the areas under a point, joined across tile edges, smallest first. */
+export function shapesAt(features: ShapeFeature[], at: [number, number]): Ring[] {
+  /* Group the pieces of each feature. */
+  const groups = new Map<string, Pair[][][]>();
+  for (const feature of features) {
+    const key = feature.id !== undefined && feature.id !== null ? `${feature.sourceLayer}#${feature.id}` : `${feature.sourceLayer}|${JSON.stringify(feature.properties ?? {})}`;
+    const list = groups.get(key) ?? [];
+    list.push(...polygonsOf(feature).filter((polygon) => polygon[0]?.length >= 4));
+    groups.set(key, list);
+  }
+
+  const rings: Ring[] = [];
+  const seen = new Set<string>();
+  for (const pieces of groups.values()) {
+    const hits = pieces.filter((polygon) => inRing(at, polygon[0]));
+    if (!hits.length) continue;
+    /* Grow from the piece under the point to the pieces touching it. */
+    const cluster = new Set(hits);
+    let box = hits.map(boxOf).reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
+    for (let round = 0; round < 12; round++) {
+      let grew = false;
+      for (const polygon of pieces) {
+        if (cluster.has(polygon) || cluster.size >= 40) continue;
+        const b = boxOf(polygon);
+        if (!touches(box, b)) continue;
+        cluster.add(polygon);
+        box = [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])];
+        grew = true;
+      }
+      if (!grew) break;
+    }
+    let joined: Pair[][][];
+    try {
+      const [first, ...rest] = [...cluster];
+      joined = rest.length ? union(first, ...rest) : [first];
+    } catch {
+      joined = hits;
+    }
+    for (const polygon of joined) {
+      if (!inRing(at, polygon[0])) continue;
+      const ring = polygon[0].slice(0, -1).map((p) => [p[0], p[1]] as [number, number]);
+      const sig = ring.map((p) => p.map((n) => n.toFixed(6)).join()).join("|");
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      rings.push(ring);
+    }
+  }
+  /* Whole districts are never a site. */
+  return rings.filter((r) => outlineArea(r) < 3_000_000).sort((a, b) => outlineArea(a) - outlineArea(b));
+}
+
+type SourceMap = {
+  getSource: (id: string) => unknown;
+  querySourceFeatures: (source: string, options: { sourceLayer: string }) => ShapeFeature[];
+};
+
+function featuresIn(map: SourceMap, layers: readonly string[]): ShapeFeature[] {
+  if (!map.getSource(SOURCE)) return [];
+  return layers.flatMap((sourceLayer) => map.querySourceFeatures(SOURCE, { sourceLayer }).map((f) => ({ ...f, sourceLayer, geometry: f.geometry })));
+}
+
+/** Every area under a point (land use, parks, green areas, water, buildings), smallest first. */
+export function areasAt(map: SourceMap, at: [number, number]): Ring[] {
+  return shapesAt(featuresIn(map, PICKABLE_LAYERS), at);
+}
+
+/**
+ * The site's likely boundary at a point: the smallest land-use area, park or
+ * green area there that is at least the size of a small plot. Buildings are
+ * left out, since a grid reference often lands on one inside the site.
+ */
+export function findSiteShape(map: SourceMap, at: [number, number]): Ring | null {
+  return shapesAt(featuresIn(map, ["landuse", "park", "landcover"]), at).find((ring) => outlineArea(ring) >= 800) ?? null;
+}

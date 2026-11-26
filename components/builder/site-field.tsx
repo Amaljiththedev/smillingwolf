@@ -1,7 +1,7 @@
 "use client";
 
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { GeoJSONSource, Map as MapLibreMap, MapGeoJSONFeature } from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
 import { Check, MousePointerClick, PenLine, SquareDashed, Undo2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { GridInput } from "@/components/builder/plan-field";
@@ -10,8 +10,9 @@ import { gridToLatLng, parseGridRef } from "@/lib/osgrid";
 import {
   DEFAULT_CENTRE,
   LINE_SETS,
-  PICKABLE_LAYERS,
+  areasAt,
   blankSite,
+  findSiteShape,
   describeArea,
   lineLayers,
   outlineArea,
@@ -51,7 +52,11 @@ export function SiteField({ value, onChange }: { value: SiteArea | null; onChang
             Marked: about {describeArea(area)}, {site.outline.length} points.
           </p>
         ) : (
-          <p className="text-[0.72rem] leading-snug text-ink/55">Not marked yet. Click the site on the map and the outline is taken from the map data, or draw it.</p>
+          <p className="text-[0.72rem] leading-snug text-ink/55">
+            {parseGridRef(site.ref)
+              ? "Found automatically: the area at the grid reference is outlined on the map. Mark it to check it or choose a different shape."
+              : "Type the grid reference and the area there is outlined automatically, or mark it yourself."}
+          </p>
         )}
         <div className="flex gap-2">
           <button
@@ -118,37 +123,6 @@ const SWATCH: Record<LineKey, string> = {
 type Mode = "pick" | "draw";
 type Ring = [number, number][];
 
-function inRing([x, y]: [number, number], ring: number[][]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-/** The outer rings of the shapes under a point, smallest first. */
-function shapesAt(features: MapGeoJSONFeature[], at: [number, number]): Ring[] {
-  const rings: Ring[] = [];
-  const seen = new Set<string>();
-  for (const feature of features) {
-    const g = feature.geometry;
-    const polygons = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
-    for (const polygon of polygons) {
-      const outer = polygon[0] as number[][];
-      if (!outer || outer.length < 4 || !inRing(at, outer)) continue;
-      const ring = outer.slice(0, -1).map((p) => [p[0], p[1]] as [number, number]);
-      const sig = ring.map((p) => p.map((n) => n.toFixed(6)).join()).join("|");
-      if (seen.has(sig)) continue;
-      seen.add(sig);
-      rings.push(ring);
-    }
-  }
-  /* Whole districts are never a site. */
-  return rings.filter((r) => outlineArea(r) < 3_000_000).sort((a, b) => outlineArea(a) - outlineArea(b));
-}
-
 function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: () => void; onSave: (outline: Ring) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -189,10 +163,6 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
       map.on("load", () => {
         const before = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
         for (const key of ["green", "water", "roads", "buildings", "paths"] as LineKey[]) for (const layer of lineLayers(key)) map.addLayer(layer, before);
-        /* Near-invisible fills, so a click can find land use, parks and buildings. */
-        for (const layer of PICKABLE_LAYERS) {
-          map.addLayer({ id: `pick-${layer}`, type: "fill", source: "openmaptiles", "source-layer": layer, paint: { "fill-color": "#000", "fill-opacity": 0.01 } }, before);
-        }
         map.addSource("draft", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addLayer({ id: "draft-fill", type: "fill", source: "draft", filter: ["==", ["geometry-type"], "Polygon"], paint: { "fill-color": "#ff8c88", "fill-opacity": 0.18 } });
         map.addLayer({ id: "draft-casing", type: "line", source: "draft", filter: ["!=", ["geometry-type"], "Point"], paint: { "line-color": "#ffffff", "line-width": 5 } });
@@ -207,6 +177,20 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
         const box0 = outlineBounds(site.outline);
         if (box0) map.fitBounds([[box0.west, box0.south], [box0.east, box0.north]], { padding: 60, duration: 0, maxZoom: 18 });
         setReady(true);
+        /* Nothing marked yet: start with the area found at the grid reference. */
+        if (!site.outline.length && ref) {
+          map.once("idle", () => {
+            const found = findSiteShape(map, [lng, lat]);
+            if (!found) {
+              setNote("No area found at the grid reference. Click the site, or draw it by hand.");
+              return;
+            }
+            setOutline(found);
+            setNote("Found at the grid reference. Click elsewhere to pick a different area, or draw it by hand.");
+            const b = outlineBounds(found);
+            if (b) map.fitBounds([[b.west, b.south], [b.east, b.north]], { padding: 60, maxZoom: 18 });
+          });
+        }
       });
 
       map.on("click", (event) => {
@@ -215,10 +199,7 @@ function BoundaryDialog({ site, onClose, onSave }: { site: SiteArea; onClose: ()
           setDrawing((points) => [...points, at]);
           return;
         }
-        const shapes = shapesAt(
-          map.queryRenderedFeatures(event.point, { layers: [...PICKABLE_LAYERS.map((l) => `pick-${l}`), "op-lines-green-park", "op-lines-water-area"] }),
-          at,
-        );
+        const shapes = areasAt(map, at);
         if (!shapes.length) {
           setNote("Nothing to pick there. Try clicking inside a field, plot or building, or draw the boundary by hand.");
           return;
