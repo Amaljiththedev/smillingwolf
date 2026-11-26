@@ -64,6 +64,8 @@ export type Field = (
     }
   | { key: string; label: string; type: "list"; itemLabel: string }
   | { key: string; label: string; type: "image"; help?: string }
+  /** A layered SVG masterplan placed by OS grid references (see lib/svg-plan.ts). */
+  | { key: string; label: string; type: "svgplan"; help?: string }
   | {
       key: string;
       label: string;
@@ -557,11 +559,27 @@ export const BLOCK_DEFINITIONS: readonly BlockDefinition[] = [
       pins: "4",
       basemap: "streets",
       view: "flat",
+      reach: "site",
       animation: "scale",
     },
     fields: [
       { key: "title", label: "Heading", type: "text" },
       { key: "caption", label: "Caption", type: "text" },
+      {
+        key: "plan",
+        label: "Masterplan drawing",
+        type: "svgplan",
+        help: "A layered SVG from the architects. Each layer (boundary, buildings, landscape and so on) becomes a switch visitors can turn on and off.",
+      },
+      {
+        key: "reach",
+        label: "Map area",
+        type: "choice",
+        options: [
+          { value: "site", label: "Keep to the site" },
+          { value: "wide", label: "Wider area" },
+        ],
+      },
       {
         key: "pins",
         label: "Comment pins",

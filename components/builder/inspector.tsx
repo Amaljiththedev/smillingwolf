@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { useId, useRef, useState } from "react";
+import { PlanField } from "@/components/builder/plan-field";
+import { readPlan } from "@/lib/svg-plan";
 import {
   ANIMATIONS,
   BLOCK_STYLE,
@@ -619,7 +621,7 @@ function BlockFields({
     <>
       {definition.fields.filter((field) => fieldApplies(field, block.props, definition.defaults)).map((field) => {
         const fieldId = `${id}-${field.key}`;
-        const grouped = field.type === "list" || field.type === "items" || field.type === "image" || field.type === "choice";
+        const grouped = field.type === "list" || field.type === "items" || field.type === "image" || field.type === "choice" || field.type === "svgplan";
         const isHidden = hidden.includes(field.key);
         return (
           <div key={field.key} className="flex flex-col gap-1.5">
@@ -705,6 +707,10 @@ function BlockFields({
                 siteId={siteId}
                 label={field.label}
               />
+            )}
+
+            {field.type === "svgplan" && (
+              <PlanField value={readPlan(block.props[field.key])} onChange={(next) => onUpdate(field.key, next)} />
             )}
 
             {field.type === "items" && (

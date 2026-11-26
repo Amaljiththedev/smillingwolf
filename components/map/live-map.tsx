@@ -21,6 +21,10 @@ import { cn } from "@/lib/utils";
 
 export type Pin = { id: string | number; lng: number; lat: number; tone: "pos" | "neg" | ""; label?: string };
 export type OverlayImage = { key: string; url: string; visible: boolean };
+/** Image corners as [lng, lat]: top-left, top-right, bottom-right, bottom-left. */
+export type Corners = [[number, number], [number, number], [number, number], [number, number]];
+/** "site": the map stays on the scheme. "wide": visitors can explore the wider area. */
+export type MapReach = "site" | "wide";
 export type MapLabel = { key: string; lng: number; lat: number; text: string };
 
 /** Glass panel classes, shared by every floating control on a map. */
@@ -42,6 +46,8 @@ const BASEMAP_ICONS = { streets: MapIcon, terrain: Mountain } as const;
 const REACH_METRES = 700;
 const ZOOM_OUT = 1.25;
 const FLOOR_ZOOM = 13;
+/* "Wider area": roughly a whole region, still never the whole world. */
+const WIDE_MIN_ZOOM = 8;
 
 /** A box REACH_METRES beyond the centre (or area), as [[west, south], [east, north]]. */
 function limits([lat, lng]: [number, number], area?: Bounds): [[number, number], [number, number]] {
@@ -102,6 +108,7 @@ export function LiveMap({
   threeD: initialThreeD = false,
   still = false,
   padding,
+  reach = "site",
   className,
   children,
 }: {
@@ -111,7 +118,7 @@ export function LiveMap({
   pins: Pin[];
   area?: Bounds;
   labels?: MapLabel[];
-  overlay?: { images: OverlayImage[]; bounds: Bounds; aspect: number };
+  overlay?: { images: OverlayImage[]; bounds: Bounds; aspect: number; corners?: Corners };
   overlayOpacity?: number;
   /** Frame these bounds on load and when "recentre" is pressed. */
   fit?: Bounds;
@@ -127,6 +134,8 @@ export function LiveMap({
   still?: boolean;
   /** Room kept clear of floating panels when framing, in px. */
   padding?: { top?: number; right?: number; bottom?: number; left?: number };
+  /** Keep the map on the site (default) or let visitors see the wider area. */
+  reach?: MapReach;
   className?: string;
   children?: ReactNode;
 }) {
@@ -146,9 +155,9 @@ export function LiveMap({
   const threeD = still ? initialThreeD : chosenThreeD;
 
   /* Latest callbacks and options, read from map events without re-creating the map. */
-  const live = useRef({ onHover, onSelect, fit, padding, centre, zoom, threeD });
+  const live = useRef({ onHover, onSelect, fit, padding, centre, zoom, threeD, reach, area });
   useEffect(() => {
-    live.current = { onHover, onSelect, fit, padding, centre, zoom, threeD };
+    live.current = { onHover, onSelect, fit, padding, centre, zoom, threeD, reach, area };
   });
 
   function frame(animate: boolean) {
@@ -182,17 +191,17 @@ export function LiveMap({
          /public (copied there on npm install). */
       lib.setWorkerUrl("/maplibre-gl-worker.mjs");
       libRef.current = lib;
-      const { centre: c, zoom: z, fit: f } = live.current;
+      const { centre: c, zoom: z, fit: f, reach: r } = live.current;
       const map = new lib.Map({
         container: box.current,
         style,
         center: [c[1], c[0]],
         zoom: z,
         maxZoom: 19.5,
-        minZoom: FLOOR_ZOOM,
+        minZoom: r === "wide" ? WIDE_MIN_ZOOM : FLOOR_ZOOM,
         maxPitch: 75,
         /* Stay on the site: no wandering off to another street or town. */
-        maxBounds: limits(c, f ?? area),
+        maxBounds: r === "wide" ? undefined : limits(c, f ?? area),
         interactive: !still,
         cooperativeGestures: !still,
         locale: {
@@ -210,7 +219,9 @@ export function LiveMap({
       map.once("load", () => {
         frame(false);
         /* Zoom-out stops a little past the default view, whatever that view is. */
-        map.once("idle", () => map.setMinZoom(Math.max(FLOOR_ZOOM, map.getZoom() - ZOOM_OUT)));
+        map.once("idle", () => {
+          if (live.current.reach === "site") map.setMinZoom(Math.max(FLOOR_ZOOM, map.getZoom() - ZOOM_OUT));
+        });
         /* Gentler wheel zoom than the default, so one flick is one small step. */
         map.scrollZoom.setWheelZoomRate(1 / 700);
         map.scrollZoom.setZoomRate(1 / 200);
@@ -290,6 +301,23 @@ export function LiveMap({
     map.easeTo({ pitch: threeD ? 58 : 0, bearing: threeD ? -18 : 0, duration: still ? 0 : 1100 });
   }, [ready, styleVersion, threeD, still]);
 
+  /* Switching between "keep to the site" and "wider area" after the map is built. */
+  const appliedReach = useRef(reach);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || appliedReach.current === reach) return;
+    appliedReach.current = reach;
+    if (reach === "wide") {
+      map.setMaxBounds(null);
+      map.setMinZoom(WIDE_MIN_ZOOM);
+    } else {
+      const { centre: c, fit: f, area: a } = live.current;
+      map.setMaxBounds(limits(c, f ?? a));
+      map.setMinZoom(FLOOR_ZOOM);
+      frame(true);
+    }
+  }, [reach, ready]);
+
   /* The scheme footprint: faint fill under the names, and a white-cased coral
      dashed line on top of everything so roads and buildings never hide it. */
   useEffect(() => {
@@ -331,20 +359,41 @@ export function LiveMap({
   /* Plan drawings laid on the ground, under the street names. */
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map || !overlay || !styleReady.current) return;
+    if (!ready || !map || !styleReady.current) return;
+    if (!overlay) {
+      for (const layer of map.getStyle().layers ?? []) {
+        if (!layer.id.startsWith("overlay-")) continue;
+        map.removeLayer(layer.id);
+        if (map.getSource(layer.id)) map.removeSource(layer.id);
+      }
+      return;
+    }
     let cancelled = false;
     const b = overlay.bounds;
-    const coordinates: [[number, number], [number, number], [number, number], [number, number]] = [
+    const coordinates: Corners = overlay.corners ?? [
       [b.west, b.north],
       [b.east, b.north],
       [b.east, b.south],
       [b.west, b.south],
     ];
+    /* Drop images from a plan that has since been replaced or removed. */
+    const keep = new Set(overlay.images.map((image) => `overlay-${image.key}`));
+    for (const layer of map.getStyle().layers ?? []) {
+      if (layer.id.startsWith("overlay-") && !keep.has(layer.id)) {
+        map.removeLayer(layer.id);
+        if (map.getSource(layer.id)) map.removeSource(layer.id);
+      }
+    }
     (async () => {
       for (const image of overlay.images) {
         const id = `overlay-${image.key}`;
         if (!image.visible && !map.getLayer(id)) continue;
-        if (!map.getSource(id)) {
+        const existing = map.getSource(id);
+        /* The plan was moved (new grid references): shift it without redrawing. */
+        if (existing && "setCoordinates" in existing) {
+          (existing as unknown as { setCoordinates: (c: Corners) => void }).setCoordinates(coordinates);
+        }
+        if (!existing) {
           let url: string;
           try {
             url = await rasterise(image.url, overlay.aspect);

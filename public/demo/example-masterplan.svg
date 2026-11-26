@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Example layered masterplan (fictional scheme). 800 x 600 units = 400 m x 300 m.
+     Bottom-left corner SJ 89700 90250, top-right corner SJ 90100 90550. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <defs>
+    <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="8" height="8" fill="#b9e07c" fill-opacity="0.55"/>
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#5f8a2c" stroke-width="1.2" stroke-opacity="0.5"/>
+    </pattern>
+  </defs>
+
+  <g id="Green_x5F_space" data-name="Green space">
+    <path d="M120 360 C 170 300, 260 300, 300 350 L 320 470 C 260 500, 170 500, 120 460 Z" fill="url(#hatch)" stroke="#5f8a2c" stroke-width="2"/>
+    <rect x="520" y="110" width="120" height="80" rx="18" fill="url(#hatch)" stroke="#5f8a2c" stroke-width="2"/>
+    <g fill="#4f7d25" fill-opacity="0.85">
+      <circle cx="160" cy="400" r="9"/><circle cx="200" cy="370" r="11"/><circle cx="250" cy="390" r="9"/>
+      <circle cx="230" cy="450" r="10"/><circle cx="170" cy="460" r="8"/><circle cx="560" cy="140" r="9"/>
+      <circle cx="605" cy="160" r="10"/>
+    </g>
+  </g>
+
+  <g id="Buildings" data-name="Buildings">
+    <g fill="#f2e6d8" stroke="#131713" stroke-width="2">
+      <rect x="150" y="120" width="140" height="70"/>
+      <rect x="150" y="210" width="60" height="90"/>
+      <rect x="230" y="210" width="60" height="90"/>
+      <rect x="370" y="120" width="100" height="150"/>
+      <rect x="370" y="300" width="160" height="70"/>
+      <rect x="560" y="240" width="90" height="140"/>
+      <rect x="400" y="420" width="70" height="90"/>
+      <rect x="490" y="420" width="70" height="90"/>
+      <rect x="580" y="420" width="70" height="90"/>
+    </g>
+  </g>
+
+  <g id="Routes" data-name="Walking and cycling routes">
+    <path d="M60 300 L 340 300 L 340 400 L 740 400" fill="none" stroke="#ff8c88" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.9"/>
+    <path d="M500 60 L 500 280 L 680 280" fill="none" stroke="#7fb7ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="14 10"/>
+  </g>
+
+  <g id="Site_x5F_boundary" data-name="Site boundary">
+    <path d="M100 80 L 700 80 L 720 300 L 690 540 L 100 540 Z" fill="none" stroke="#ffffff" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M100 80 L 700 80 L 720 300 L 690 540 L 100 540 Z" fill="none" stroke="#e5484d" stroke-width="4" stroke-dasharray="16 10" stroke-linejoin="round"/>
+  </g>
+</svg>

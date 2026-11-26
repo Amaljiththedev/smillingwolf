@@ -31,8 +31,9 @@ import {
 } from "@/lib/blocks";
 import { EASE_OUT } from "@/lib/motion";
 import type { Block } from "@/lib/sites";
-import { LiveMap, glass } from "@/components/map/live-map";
-import { demoPins } from "@/lib/geo";
+import { LiveMap, glass, type Corners } from "@/components/map/live-map";
+import { demoPins, pad, planBounds, type Bounds } from "@/lib/geo";
+import { layerImage, planCorners, planId, readPlan } from "@/lib/svg-plan";
 import { isBasemap } from "@/lib/map-styles";
 import { cn } from "@/lib/utils";
 
@@ -809,30 +810,136 @@ function Contact({ props, accent }: BlockProps) {
 /* Default spot for a new map block until the client sets the scheme location. */
 const DEMO_CENTRE: [number, number] = [53.4084, -2.1494];
 
-/* A real street map with comment pins. Still in the editor so dragging the page never pans it. */
+/* A real street map with comment pins. Still in the editor so dragging the page never pans it.
+   With a layered masterplan, the drawing sits on the map at its OS grid references and each
+   layer gets a switch. Without grid references it is shown at the scheme's centre. */
 function MapBlock({ props, accent, editing }: BlockProps) {
+  const plan = readPlan(props.plan);
+  const corners: Corners | null = plan ? planCorners(plan) : null;
+  const footprint: Bounds | null = corners
+    ? {
+        west: Math.min(...corners.map((c) => c[0])),
+        east: Math.max(...corners.map((c) => c[0])),
+        south: Math.min(...corners.map((c) => c[1])),
+        north: Math.max(...corners.map((c) => c[1])),
+      }
+    : plan
+      ? planBounds(DEMO_CENTRE, plan.width, plan.height, 400)
+      : null;
+  const centre: [number, number] = footprint
+    ? [(footprint.north + footprint.south) / 2, (footprint.east + footprint.west) / 2]
+    : DEMO_CENTRE;
+
+  /* Visitors' own layer choices, on top of the defaults set in the editor. */
+  const [switched, setSwitched] = useState<Record<string, boolean>>({});
+  const [layersOpen, setLayersOpen] = useState<boolean | null>(null);
+  const id = plan ? planId(plan) : "";
+  const isOn = (key: string, fallback: boolean) => (editing ? fallback : (switched[`${id}:${key}`] ?? fallback));
+
   const pinCount = Number(readText(props, "pins", "4")) || 0;
-  const pins = demoPins(DEMO_CENTRE, pinCount);
+  const pins = demoPins(centre, pinCount);
+  const reach = readText(props, "reach", "site") === "wide" ? "wide" : "site";
+
+  const overlay =
+    plan && footprint
+      ? {
+          images: plan.layers.map((layer) => ({
+            key: `${id}-${layer.key}`,
+            url: layerImage(plan, layer.key),
+            visible: isOn(layer.key, layer.on),
+          })),
+          bounds: footprint,
+          aspect: plan.height / plan.width,
+          corners: corners ?? undefined,
+        }
+      : undefined;
 
   return (
     <div className={section}>
       <div className={inner}>
         <Heading>{readText(props, "title")}</Heading>
         <LiveMap
+          /* A new plan or a new position starts a fresh map, framed on the plan. */
+          key={`${id}|${corners ? `${corners[0].join()}|${corners[2].join()}` : "unplaced"}`}
           still={editing}
-          centre={DEMO_CENTRE}
+          centre={centre}
           zoom={16.2}
           pins={pins}
+          overlay={overlay}
+          overlayOpacity={0.92}
+          fit={footprint ? pad(footprint, 0.08) : undefined}
+          reach={reach}
           basemap={isBasemap(props.basemap) ? props.basemap : "streets"}
           threeD={readText(props, "view") === "3d"}
           className={cn("h-[22rem] rounded-xl border border-ink/10 @3xl:h-[30rem]", readText(props, "title") && "mt-5")}
         >
-          {readText(props, "caption") && <div className={cn(glass, "absolute left-3 right-3 top-3 z-10 flex items-center gap-2 px-3 py-2.5 @lg:right-auto")}>
-            <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-full" style={{ backgroundColor: accent }}>
-              <MapPin className="size-3.5 text-ink" />
-            </span>
-            <span className="text-[0.8rem] leading-snug text-ink">{readText(props, "caption")}</span>
-          </div>}
+          {readText(props, "caption") && (
+            <div className={cn(glass, "absolute left-3 right-3 top-3 z-10 flex items-center gap-2 px-3 py-2.5 @lg:right-auto @lg:max-w-[60%]")}>
+              <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-full" style={{ backgroundColor: accent }}>
+                <MapPin className="size-3.5 text-ink" />
+              </span>
+              <span className="text-[0.8rem] leading-snug text-ink">{readText(props, "caption")}</span>
+            </div>
+          )}
+
+          {plan && plan.layers.length > 1 && (
+            <div className={cn(glass, "absolute bottom-3 left-3 z-10 max-w-[calc(100%-1.5rem)] @lg:max-w-[16rem]")}>
+              <button
+                type="button"
+                aria-expanded={layersOpen ?? undefined}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  /* Until someone chooses, the list is open on wide pages and closed on narrow ones (CSS). */
+                  const list = event.currentTarget.nextElementSibling;
+                  const shown = list ? getComputedStyle(list).display !== "none" : true;
+                  setLayersOpen(!shown);
+                }}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-[0.72rem] font-medium uppercase tracking-[0.08em] text-ink/70 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink"
+              >
+                Plan layers
+                <span aria-hidden="true" className={cn("transition-transform duration-200", layersOpen === null ? "@max-lg:-rotate-90" : !layersOpen && "-rotate-90")}>
+                  ▾
+                </span>
+              </button>
+              <ul className={cn("max-h-[11rem] flex-col gap-0.5 overflow-y-auto px-1.5 pb-1.5", layersOpen === null ? "hidden @lg:flex" : layersOpen ? "flex" : "hidden")}>
+                {plan.layers.map((layer) => {
+                  const on = isOn(layer.key, layer.on);
+                  return (
+                    <li key={layer.key}>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={on}
+                        tabIndex={editing ? -1 : 0}
+                        onClick={(event) => {
+                          if (editing) return;
+                          event.stopPropagation();
+                          setSwitched((all) => ({ ...all, [`${id}:${layer.key}`]: !on }));
+                        }}
+                        className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left text-[0.78rem] text-ink transition-colors hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-ink"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "relative h-4 w-7 shrink-0 rounded-full transition-colors duration-200",
+                            on ? "bg-ink" : "bg-ink/20",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "absolute top-0.5 size-3 rounded-full bg-white shadow transition-[left] duration-200",
+                              on ? "left-3.5" : "left-0.5",
+                            )}
+                          />
+                        </span>
+                        <span className="min-w-0 truncate">{layer.label}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </LiveMap>
       </div>
     </div>
