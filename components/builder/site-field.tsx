@@ -106,11 +106,11 @@ export function SiteField({ value, onChange }: { value: SiteArea | null; onChang
 }
 
 const SWATCH: Record<LineKey, string> = {
-  paths: "#f2675f",
-  roads: "#8d8a84",
-  buildings: "#e6d6bd",
-  green: "#8fc35a",
-  water: "#6fa9dc",
+  paths: "#b4524c",
+  roads: "#bdbab4",
+  buildings: "#4a4a46",
+  green: "#7fa35a",
+  water: "#6a96b8",
 };
 
 /* ---------- The boundary map ---------- */

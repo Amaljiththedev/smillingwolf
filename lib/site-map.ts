@@ -92,62 +92,50 @@ const ROADS: FilterSpecification = ["match", ["get", "class"], ["motorway", "tru
 const GREEN_LAND: FilterSpecification = ["match", ["get", "class"], ["grass", "wood", "farmland"], true, false];
 const GREEN_USE: FilterSpecification = ["match", ["get", "class"], ["pitch", "playground", "cemetery", "garden", "allotments"], true, false];
 
-const roadWidth = (base: number) =>
-  ["interpolate", ["exponential", 1.6], ["zoom"], 13, base * 0.4, 16, base * 1.6, 19, base * 6] as unknown as number;
+const thin = (low: number, high: number) => ["interpolate", ["linear"], ["zoom"], 14, low, 19, high] as unknown as number;
 
-/** Map layers for one set of lines, all with ids starting "op-lines-". */
+/*
+  Map layers for one set of lines, all with ids starting "op-lines-".
+  Kept quiet on purpose: fine lines and faint tints that let the photo show
+  through, like a site plan, not a cartoon.
+*/
 export function lineLayers(key: LineKey): LayerSpecification[] {
   const id = (part: string) => `op-lines-${key}-${part}`;
   switch (key) {
     case "green":
       return [
-        { id: id("park"), type: "fill", source: SOURCE, "source-layer": "park", paint: { "fill-color": "#b5d98a", "fill-opacity": 0.55, "fill-outline-color": "#6f9d3c" } },
-        { id: id("cover"), type: "fill", source: SOURCE, "source-layer": "landcover", filter: GREEN_LAND, paint: { "fill-color": "#b5d98a", "fill-opacity": 0.5, "fill-outline-color": "#6f9d3c" } },
-        { id: id("use"), type: "fill", source: SOURCE, "source-layer": "landuse", filter: GREEN_USE, paint: { "fill-color": "#c4e29c", "fill-opacity": 0.55, "fill-outline-color": "#6f9d3c" } },
+        { id: id("park"), type: "fill", source: SOURCE, "source-layer": "park", paint: { "fill-color": "#7fa35a", "fill-opacity": 0.14 } },
+        { id: id("cover"), type: "fill", source: SOURCE, "source-layer": "landcover", filter: GREEN_LAND, paint: { "fill-color": "#7fa35a", "fill-opacity": 0.12 } },
+        { id: id("use"), type: "fill", source: SOURCE, "source-layer": "landuse", filter: GREEN_USE, paint: { "fill-color": "#7fa35a", "fill-opacity": 0.12 } },
+        { id: id("edge"), type: "line", source: SOURCE, "source-layer": "park", paint: { "line-color": "#6b8a4a", "line-width": thin(0.4, 0.9), "line-opacity": 0.5 } },
       ];
     case "water":
       return [
-        { id: id("area"), type: "fill", source: SOURCE, "source-layer": "water", paint: { "fill-color": "#9fcdef", "fill-opacity": 0.8, "fill-outline-color": "#5f9fd3" } },
-        { id: id("way"), type: "line", source: SOURCE, "source-layer": "waterway", paint: { "line-color": "#6fa9dc", "line-width": 2 } },
+        { id: id("area"), type: "fill", source: SOURCE, "source-layer": "water", paint: { "fill-color": "#7aa7c7", "fill-opacity": 0.22 } },
+        { id: id("way"), type: "line", source: SOURCE, "source-layer": "waterway", paint: { "line-color": "#6a96b8", "line-width": thin(0.6, 1.4), "line-opacity": 0.7 } },
       ];
     case "roads":
       return [
         {
-          id: id("casing"),
+          id: id("edge"),
           type: "line",
           source: SOURCE,
           "source-layer": "transportation",
           filter: ROADS,
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#8d8a84", "line-width": roadWidth(1.4), "line-opacity": 0.9 },
-        },
-        {
-          id: id("fill"),
-          type: "line",
-          source: SOURCE,
-          "source-layer": "transportation",
-          filter: ROADS,
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#ffffff", "line-width": roadWidth(1), "line-opacity": 0.95 },
+          layout: { "line-join": "round" },
+          paint: { "line-color": "#ffffff", "line-width": thin(0.5, 1.2), "line-opacity": 0.75 },
         },
       ];
     case "buildings":
       return [
-        {
-          id: id("fill"),
-          type: "fill",
-          source: SOURCE,
-          "source-layer": "building",
-          minzoom: 14,
-          paint: { "fill-color": "#f4ebdd", "fill-opacity": 0.9 },
-        },
+        { id: id("fill"), type: "fill", source: SOURCE, "source-layer": "building", minzoom: 14, paint: { "fill-color": "#ffffff", "fill-opacity": 0.28 } },
         {
           id: id("edge"),
           type: "line",
           source: SOURCE,
           "source-layer": "building",
           minzoom: 14,
-          paint: { "line-color": "#3c3a35", "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.3, 18, 1.2] as unknown as number },
+          paint: { "line-color": "#4a4a46", "line-width": thin(0.25, 0.8), "line-opacity": 0.65 },
         },
       ];
     case "paths":
@@ -158,9 +146,9 @@ export function lineLayers(key: LineKey): LayerSpecification[] {
           source: SOURCE,
           "source-layer": "transportation",
           filter: PATHS,
-          minzoom: 13,
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#f2675f", "line-width": ["interpolate", ["linear"], ["zoom"], 14, 1, 18, 3] as unknown as number, "line-dasharray": [1.6, 1.2] },
+          minzoom: 14,
+          layout: { "line-join": "round" },
+          paint: { "line-color": "#b4524c", "line-width": thin(0.6, 1.5), "line-opacity": 0.75, "line-dasharray": [3, 2] },
         },
         {
           id: id("cycle"),
@@ -168,9 +156,9 @@ export function lineLayers(key: LineKey): LayerSpecification[] {
           source: SOURCE,
           "source-layer": "transportation",
           filter: CYCLE,
-          minzoom: 13,
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#3f7fe0", "line-width": ["interpolate", ["linear"], ["zoom"], 14, 1.2, 18, 3.4] as unknown as number, "line-dasharray": [2.4, 1.2] },
+          minzoom: 14,
+          layout: { "line-join": "round" },
+          paint: { "line-color": "#4a6f9e", "line-width": thin(0.7, 1.6), "line-opacity": 0.75, "line-dasharray": [4, 2] },
         },
       ];
   }
