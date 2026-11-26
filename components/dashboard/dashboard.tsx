@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { motion, useInView, useReducedMotion, AnimatePresence } from "framer-motion";
-import { Download, FileText, Loader2, MessageSquareText } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { ArrowRight, ChevronRight, Download, FileText, Inbox, Loader2, MessageSquareText } from "lucide-react";
+import { useId, useRef, useState, useTransition } from "react";
 import { Odometer } from "@/components/ui/odometer";
 import { loadDashboard } from "@/lib/actions/dashboard";
 import {
@@ -21,9 +21,10 @@ import { CommentsMap } from "./comments-map";
 import { AreaChart, BarRow, Card, DataTable, Legend, Reveal, StackedRow, fmt } from "./charts";
 
 /*
-  Results for one scheme, read from WordPress. Same cards as the plugin's own
-  dashboard: headline numbers, responses over time, each question, themes,
-  comments on the plan, quick reactions and who responded.
+  Results for one scheme, read from WordPress, laid out by importance:
+  1. headline numbers, 2. anything waiting on the team, 3. key findings
+  (support and themes), 4. the questionnaire as one card (pick a question to
+  see every answer), 5. comments on the map, 6. supporting detail.
 */
 
 type Preset = "all" | "7" | "30" | "custom";
@@ -183,8 +184,8 @@ export function Dashboard({ siteId, initial }: { siteId: string; initial: Dashbo
       </Reveal>
 
       <div className={cn("transition-opacity duration-300", pending && "opacity-60")}>
-        {/* Headline numbers */}
-        <div className={cn("mt-8 grid grid-cols-2 gap-3 md:grid-cols-3", s.signups !== null ? "xl:grid-cols-5" : "xl:grid-cols-4")}>
+        {/* 1. Headline numbers */}
+        <div className={cn("mt-6 grid grid-cols-2 gap-3 md:grid-cols-4", s.signups !== null && "xl:grid-cols-5")}>
           <Tile label="Responses" value={s.responses} colour="bg-lime" index={0} />
           {s.support_pct !== null ? (
             <Tile label="Support the plans" value={s.support_pct} suffix="%" colour="bg-blue" index={1} />
@@ -196,88 +197,71 @@ export function Dashboard({ siteId, initial }: { siteId: string; initial: Dashbo
             value={s.comments}
             colour="bg-peach"
             index={2}
-            footer={
-              s.pending_comments > 0 ? (
-                <Link href={`${base}/moderate`} className="underline decoration-ink/30 underline-offset-2 hover:decoration-ink">
-                  {fmt.format(s.pending_comments)} waiting for review
-                </Link>
-              ) : (
-                "None waiting"
-              )
-            }
           />
           <Tile label="Quick reactions" value={s.reactions} colour="bg-lilac" index={3} />
-          {s.signups !== null && <Tile label="Signed up for updates" value={s.signups} colour="bg-yellow" index={4} />}
+          {s.signups !== null && (
+            <Tile
+              label="Signed up for updates"
+              value={s.signups}
+              colour="bg-yellow"
+              index={4}
+              className="col-span-2 md:col-span-4 xl:col-span-1"
+            />
+          )}
         </div>
 
-        {/* Over time */}
-        <div className="mt-3">
-          <Card
-            title="Responses over time"
-            sub="Questionnaires sent each day"
-            table={<DataTable head={["Day", "Responses"]} rows={data.timeline.map((p) => [p.date, p.count])} />}
-          >
-            <AreaChart points={data.timeline} />
-          </Card>
-        </div>
-
-        {/* The questionnaire */}
-        <SectionHeading>The questionnaire</SectionHeading>
-        <div className="grid gap-3 lg:grid-cols-2">
-          {data.questionnaire.map((q, i) => (
-            <QuestionCard key={q.key} question={q} delay={(i % 2) * 0.08} />
-          ))}
-        </div>
-
-        {showSupport && (
-          <div className="mt-3">
-            <Card
-              title="Support by proposal"
-              sub="From strongly oppose to strongly support"
-              table={
-                <DataTable
-                  head={["Proposal", ...Object.values(data.support.scale), "Total"]}
-                  rows={data.support.proposals.map((p) => [
-                    p.label,
-                    ...(Object.keys(data.support.scale) as ScaleKey[]).map((k) => p.counts[k]),
-                    p.total,
-                  ])}
-                />
-              }
+        {/* 2. Anything waiting on the team */}
+        {s.pending_comments > 0 && (
+          <Reveal>
+            <Link
+              href={`${base}/moderate`}
+              className="mt-3 flex items-center gap-3 rounded-sw border border-coral bg-coral/15 px-4 py-3 text-[0.88rem] text-ink transition-colors hover:bg-coral/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
             >
-              <Legend items={(Object.keys(data.support.scale) as ScaleKey[]).map((k) => ({ label: data.support.scale[k], colour: SCALE_COLOURS[k] }))} />
-              <ul>
-                {data.support.proposals.map((p, i) => (
-                  <StackedRow
-                    key={p.key}
-                    index={i}
-                    label={p.label}
-                    trailing={`${p.net > 0 ? "+" : ""}${p.net}`}
-                    segments={(Object.keys(data.support.scale) as ScaleKey[]).map((k) => ({
-                      key: k,
-                      label: data.support.scale[k],
-                      value: p.counts[k],
-                      colour: SCALE_COLOURS[k],
-                    }))}
-                  />
-                ))}
-              </ul>
-            </Card>
-          </div>
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-coral">
+                <Inbox className="size-4" aria-hidden="true" />
+              </span>
+              <span className="min-w-0">
+                <span className="font-medium">
+                  {fmt.format(s.pending_comments)} {s.pending_comments === 1 ? "comment" : "comments"} waiting for review
+                </span>
+                <span className="hidden text-ink/65 sm:inline"> before they show on the site</span>
+              </span>
+              <span className="ml-auto inline-flex shrink-0 items-center gap-1 font-medium">
+                Review
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </span>
+            </Link>
+          </Reveal>
         )}
 
-        {/* What people said */}
-        <SectionHeading>What people said</SectionHeading>
-        <CommentsMap data={data} base={base} />
-
-        <div className="mt-3 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+        {/* 3. Key findings */}
+        <SectionHeading>Key findings</SectionHeading>
+        <div className="grid gap-3 lg:grid-cols-3">
+          {showSupport ? (
+            <SupportCard data={data} className="lg:col-span-2" />
+          ) : (
+            <TimelineCard data={data} className="lg:col-span-2" />
+          )}
           <Card
             title="Themes"
-            sub="Written answers and comments, grouped by theme"
+            sub="What written answers and comments are about"
             table={<DataTable head={["Theme", "Mentions"]} rows={data.themes.map((t) => [t.label, t.count])} />}
           >
             <ThemeBars data={data} />
           </Card>
+        </div>
+
+        {/* 4. The questionnaire, one card */}
+        <SectionHeading>Questionnaire</SectionHeading>
+        <QuestionnaireCard questions={data.questionnaire} />
+
+        {/* 5. Comments on the map */}
+        <SectionHeading>{data.site.place === "plan" ? "Comments on the plan" : "Comments on the map"}</SectionHeading>
+        <CommentsMap data={data} base={base} />
+
+        {/* 6. Supporting detail */}
+        <SectionHeading>More detail</SectionHeading>
+        <div className={cn("grid gap-3 lg:grid-cols-2", showSupport && "xl:grid-cols-3")}>
           <Card
             title="Quick reactions"
             sub="Like, unsure or dislike on each idea"
@@ -321,6 +305,7 @@ export function Dashboard({ siteId, initial }: { siteId: string; initial: Dashbo
             )}
           </Card>
           <RespondentsCard data={data} />
+          {showSupport && <TimelineCard data={data} className="lg:col-span-2 xl:col-span-1" />}
         </div>
 
         <p className="mt-8 font-mono text-[0.6rem] uppercase tracking-[0.1em] text-ink/45">
@@ -328,6 +313,49 @@ export function Dashboard({ siteId, initial }: { siteId: string; initial: Dashbo
         </p>
       </div>
     </div>
+  );
+}
+
+function SupportCard({ data, className }: { data: DashboardData; className?: string }) {
+  const keys = Object.keys(data.support.scale) as ScaleKey[];
+  return (
+    <Card
+      className={className}
+      title="Support by proposal"
+      sub="From strongly oppose to strongly support, with the net score"
+      table={
+        <DataTable
+          head={["Proposal", ...Object.values(data.support.scale), "Total"]}
+          rows={data.support.proposals.map((p) => [p.label, ...keys.map((k) => p.counts[k]), p.total])}
+        />
+      }
+    >
+      <Legend items={keys.map((k) => ({ label: data.support.scale[k], colour: SCALE_COLOURS[k] }))} />
+      <ul>
+        {data.support.proposals.map((p, i) => (
+          <StackedRow
+            key={p.key}
+            index={i}
+            label={p.label}
+            trailing={`${p.net > 0 ? "+" : ""}${p.net}`}
+            segments={keys.map((k) => ({ key: k, label: data.support.scale[k], value: p.counts[k], colour: SCALE_COLOURS[k] }))}
+          />
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function TimelineCard({ data, className }: { data: DashboardData; className?: string }) {
+  return (
+    <Card
+      className={className}
+      title="Responses over time"
+      sub="Questionnaires sent each day"
+      table={<DataTable head={["Day", "Responses"]} rows={data.timeline.map((p) => [p.date, p.count])} />}
+    >
+      <AreaChart points={data.timeline} />
+    </Card>
   );
 }
 
@@ -418,6 +446,7 @@ function Tile({
   colour,
   index,
   footer,
+  className,
 }: {
   label: string;
   value: number;
@@ -425,6 +454,7 @@ function Tile({
   colour: string;
   index: number;
   footer?: React.ReactNode;
+  className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, amount: 0.5 });
@@ -436,12 +466,12 @@ function Tile({
       animate={inView || reduce ? { opacity: 1, y: 0, scale: 1 } : undefined}
       transition={{ duration: 0.6, ease: EASE_OUT, delay: 0.06 * index }}
       whileHover={reduce ? undefined : { y: -3 }}
-      className={cn("flex min-h-[9.5rem] flex-col justify-between rounded-sw p-4 md:p-5", colour)}
+      className={cn("flex min-h-[7rem] flex-col justify-between rounded-sw p-4", colour, className)}
     >
       <p className="font-mono text-[0.6rem] uppercase tracking-[0.1em] text-ink/65">{label}</p>
       <div>
         <p className="font-medium leading-none tracking-[-0.03em] text-ink">
-          <Odometer value={value} size={44} run={inView || !!reduce} suffix={suffix} delay={0.15 + 0.06 * index} />
+          <Odometer value={value} size={36} run={inView || !!reduce} suffix={suffix} delay={0.15 + 0.06 * index} />
         </p>
         {footer && <p className="mt-2 text-[0.78rem] text-ink/70">{footer}</p>}
       </div>
@@ -449,32 +479,206 @@ function Tile({
   );
 }
 
-function QuestionCard({ question: q, delay }: { question: Question; delay: number }) {
-  const label = q.kind === "ranking" ? "Ranked first" : q.kind === "multi" ? "Could choose more than one" : undefined;
-  const max = Math.max(1, ...q.choices.map((c) => c.count));
+/** The answer most people gave, for the one-line summary in the list. */
+function topAnswer(q: Question): { label: string; pct: number | null } {
+  if (q.type === "text") return { label: `${fmt.format(q.notes)} written answers`, pct: null };
+  if (q.total === 0 || !q.choices.length) return { label: "No answers yet", pct: null };
+  const top = q.choices.reduce((best, c) => (c.count > best.count ? c : best));
+  return { label: top.label, pct: top.pct };
+}
+
+function answered(q: Question): number {
+  return q.type === "text" ? q.notes : q.total;
+}
+
+const NARROW = "(max-width: 1023px)";
+
+/** "Question 1A" to "Q1A", so the list column stays narrow. */
+function shortCode(q: Question, index: number): string {
+  return q.code ? q.code.replace(/^question\s*/i, "Q") : `Q${index + 1}`;
+}
+
+/*
+  Every question in one card. Each row gives the question and its top answer;
+  selecting a row shows all its answers and comments. On wide screens the
+  detail sits beside the list, on narrow screens it opens under the row.
+*/
+function QuestionnaireCard({ questions }: { questions: Question[] }) {
+  const [openKey, setOpenKey] = useState<string | null>(questions[0]?.key ?? null);
+  const headingId = useId();
+  const detailId = useId();
+  const open = questions.find((q) => q.key === openKey) ?? null;
+  const shown = open ?? questions[0] ?? null;
+
+  const opinion = questions.filter((q) => !q.demographic);
+  const about = questions.filter((q) => q.demographic);
+  const groups: [string, Question[]][] =
+    opinion.length && about.length
+      ? [
+          ["Views on the plans", opinion],
+          ["About you", about],
+        ]
+      : [["", questions]];
+
+  function pick(key: string) {
+    const narrow = window.matchMedia(NARROW).matches;
+    setOpenKey((current) => (narrow && current === key ? null : key));
+  }
+
+  if (!questions.length) {
+    return (
+      <Card title="Questionnaire">
+        <Empty>This scheme has no questionnaire yet.</Empty>
+      </Card>
+    );
+  }
 
   return (
-    <Card
-      delay={delay}
-      title={q.text}
-      sub={[q.code, label].filter(Boolean).join(" · ")}
-      table={
-        q.type === "choice" ? (
-          <DataTable head={["Answer", "People", "Share"]} rows={q.choices.map((c) => [c.label, c.count, `${c.pct}%`])} />
-        ) : undefined
-      }
-    >
-      {q.type === "text" ? (
-        <div>
-          <p className="text-[0.85rem] text-ink/70">
-            <span className="text-[1.6rem] font-medium tracking-[-0.02em] text-ink">{fmt.format(q.notes)}</span> written answers
+    <Reveal>
+      <section aria-labelledby={headingId} className="overflow-hidden rounded-sw border border-ink/10 bg-white">
+        <header className="border-b border-ink/10 px-4 py-3.5 md:px-5">
+          <h2 id={headingId} className="text-[1.05rem] font-medium leading-tight tracking-[-0.01em] text-ink">
+            {questions.length} questions
+          </h2>
+          <p className="mt-1 text-[0.78rem] text-ink/55">
+            The top answer for each. Select a question to see every answer and comment.
           </p>
-          <Quotes items={q.latest} />
+        </header>
+
+        <div className="lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+          <div className="lg:max-h-[40rem] lg:overflow-y-auto lg:border-r lg:border-ink/10">
+            {groups.map(([label, list]) => (
+              <div key={label || "all"}>
+                {label && (
+                  <p className="sticky top-0 z-10 border-b border-ink/5 bg-white/95 px-4 pb-1.5 pt-3 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-ink/45 backdrop-blur md:px-5">
+                    {label}
+                  </p>
+                )}
+                <ul className="divide-y divide-ink/[0.07]">
+                  {list.map((q) => {
+                    const top = topAnswer(q);
+                    const here = open?.key === q.key;
+                    const active = shown?.key === q.key;
+                    return (
+                      <li key={q.key}>
+                        <button
+                          type="button"
+                          aria-expanded={here}
+                          aria-controls={detailId}
+                          onClick={() => pick(q.key)}
+                          className={cn(
+                            "relative flex w-full items-start gap-3 px-4 py-3 text-left transition-colors duration-150 md:px-5",
+                            "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink",
+                            active ? "lg:bg-paper" : "hover:bg-paper/60",
+                            here && "bg-paper/60",
+                          )}
+                        >
+                          {active && (
+                            <span aria-hidden="true" className="absolute inset-y-0 left-0 hidden w-0.5 bg-ink lg:block" />
+                          )}
+                          <span className="mt-[0.2rem] w-8 shrink-0 font-mono text-[0.6rem] uppercase tracking-[0.06em] text-ink/45">
+                            {shortCode(q, questions.indexOf(q))}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={cn("block text-[0.88rem] leading-snug text-ink", !here && "line-clamp-2")}>
+                              {q.text}
+                            </span>
+                            <span className="mt-1.5 flex items-center gap-2 text-[0.76rem] text-ink/60">
+                              {top.pct !== null && (
+                                <span aria-hidden="true" className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-ink/10">
+                                  <span className="block h-full rounded-full bg-ink" style={{ width: `${top.pct}%` }} />
+                                </span>
+                              )}
+                              <span className="truncate">
+                                {top.pct !== null && <span className="font-medium text-ink">{top.pct}% </span>}
+                                {top.label}
+                              </span>
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-right">
+                            <span className="block text-[0.92rem] font-medium tabular-nums text-ink">
+                              {fmt.format(answered(q))}
+                            </span>
+                            <span className="block font-mono text-[0.52rem] uppercase tracking-[0.1em] text-ink/45">answers</span>
+                          </span>
+                          <ChevronRight
+                            aria-hidden="true"
+                            className={cn(
+                              "mt-0.5 size-4 shrink-0 transition-transform duration-200",
+                              here ? "rotate-90 text-ink lg:rotate-0" : "text-ink/30",
+                            )}
+                          />
+                        </button>
+                        {here && (
+                          <div className="border-t border-ink/10 bg-paper/40 px-4 py-4 md:px-5 lg:hidden">
+                            <QuestionDetail key={q.key} question={q} />
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          <div id={detailId} aria-live="polite" className="hidden lg:block">
+            {shown && (
+              <motion.div
+                key={shown.key}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: EASE_OUT }}
+                className="p-5 xl:p-6"
+              >
+                <QuestionDetail question={shown} wide />
+              </motion.div>
+            )}
+          </div>
         </div>
-      ) : q.total === 0 ? (
-        <Empty>No answers in this date range.</Empty>
-      ) : (
-        <>
+      </section>
+    </Reveal>
+  );
+}
+
+function QuestionDetail({ question: q, wide = false }: { question: Question; wide?: boolean }) {
+  const [asTable, setAsTable] = useState(false);
+  const kind = q.kind === "ranking" ? "Ranked first" : q.kind === "multi" ? "Could choose more than one" : undefined;
+  const max = Math.max(1, ...q.choices.map((c) => c.count));
+  const hasChart = q.type === "choice" && q.total > 0;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-mono text-[0.58rem] uppercase tracking-[0.1em] text-ink/50">
+          {[q.code, kind, `${fmt.format(answered(q))} answered`].filter(Boolean).join(" · ")}
+        </p>
+        {hasChart && (
+          <button
+            type="button"
+            aria-pressed={asTable}
+            onClick={() => setAsTable((v) => !v)}
+            className="rounded-[3px] border border-ink/15 px-2 py-0.5 text-[0.72rem] text-ink/70 transition-colors hover:bg-ink/5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink"
+          >
+            {asTable ? "Chart" : "Table"}
+          </button>
+        )}
+      </div>
+      {wide && <h3 className="mt-2 text-[1.15rem] font-medium leading-snug tracking-[-0.01em] text-ink">{q.text}</h3>}
+      {q.hint && <p className="mt-1 text-[0.8rem] text-ink/55">{q.hint}</p>}
+
+      <div className="mt-4">
+        {q.type === "text" ? (
+          q.latest.length ? (
+            <Quotes items={q.latest} />
+          ) : (
+            <Empty>No written answers in this date range.</Empty>
+          )
+        ) : !hasChart ? (
+          <Empty>No answers in this date range.</Empty>
+        ) : asTable ? (
+          <DataTable head={["Answer", "People", "Share"]} rows={q.choices.map((c) => [c.label, c.count, `${c.pct}%`])} />
+        ) : (
           <ul>
             {q.choices.map((c, i) => (
               <BarRow
@@ -488,19 +692,19 @@ function QuestionCard({ question: q, delay }: { question: Question; delay: numbe
               />
             ))}
           </ul>
-          {q.notes > 0 && (
-            <details className="group mt-3 border-t border-ink/10 pt-3">
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[0.8rem] text-ink/65 hover:text-ink">
-                <MessageSquareText className="size-3.5" aria-hidden="true" />
-                {fmt.format(q.notes)} added a comment
-                <span className="ml-1 transition-transform duration-200 group-open:rotate-90">›</span>
-              </summary>
-              <Quotes items={q.latest} />
-            </details>
-          )}
-        </>
-      )}
-    </Card>
+        )}
+
+        {q.type === "choice" && q.notes > 0 && (
+          <div className="mt-4 border-t border-ink/10 pt-3">
+            <p className="flex items-center gap-1.5 text-[0.8rem] text-ink/65">
+              <MessageSquareText className="size-3.5" aria-hidden="true" />
+              {fmt.format(q.notes)} added a comment
+            </p>
+            <Quotes items={q.latest} />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
