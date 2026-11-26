@@ -58,7 +58,7 @@ function query(range: Range): string {
   return s ? `?${s}` : "";
 }
 
-export function Dashboard({ siteId, initial }: { siteId: string; initial: DashboardData }) {
+export function Dashboard({ siteId, initial, note }: { siteId: string; initial: DashboardData; note?: string | null }) {
   const [data, setData] = useState(initial);
   const [preset, setPreset] = useState<Preset>("all");
   const [range, setRange] = useState<Range>({});
@@ -177,6 +177,12 @@ export function Dashboard({ siteId, initial }: { siteId: string; initial: Dashbo
           </span>
         </div>
 
+        {note && (
+          <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-ink/10 bg-white px-3 py-1 text-[0.78rem] text-ink/65">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-yellow ring-1 ring-ink/20" />
+            {note}
+          </p>
+        )}
         {error && (
           <p role="alert" className="mt-4 rounded-sw border border-coral bg-coral/15 px-3 py-2 text-[0.85rem] text-ink">
             {error}

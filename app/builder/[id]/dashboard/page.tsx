@@ -5,7 +5,7 @@ import { SiteNav } from "@/components/dashboard/site-nav";
 import { WordPressNotice } from "@/components/dashboard/wordpress-notice";
 import { getSession } from "@/lib/auth";
 import { getSite } from "@/lib/sites";
-import { WordPressError, getDashboard } from "@/lib/wordpress";
+import { WordPressError, demoNote, getDashboard } from "@/lib/wordpress";
 
 export const instant = false;
 
@@ -31,7 +31,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ id: 
         <SiteNav site={site} />
       </TopBar>
       <main className="min-h-[calc(100svh-3.5rem)] bg-paper">
-        {data ? <Dashboard siteId={site.id} initial={data} /> : <WordPressNotice message={error ?? ""} />}
+        {data ? <Dashboard siteId={site.id} initial={data} note={demoNote()} /> : <WordPressNotice message={error ?? ""} />}
       </main>
     </>
   );

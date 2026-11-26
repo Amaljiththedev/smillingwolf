@@ -5,6 +5,7 @@ import {
   type ExportType,
   type Range,
 } from "@/lib/consultation";
+import marketHill from "@/lib/demo/market-hill.json";
 
 /*
   Server-side client for the WordPress back end.
@@ -18,7 +19,46 @@ import {
     WP_API_APP_PASSWORD  Users > Profile > Application passwords
 
   Only import this from server components, server actions and route handlers.
+
+  Demo mode: when WP_API_URL is not set at all (for example the hosted
+  preview on Vercel), results come from a saved copy of the example scheme in
+  lib/demo instead, so the dashboard, moderation, report and downloads still
+  work. Moderation changes then last only while the server instance is warm,
+  and uploads are switched off.
 */
+
+type Snapshot = {
+  savedAt: string;
+  dashboard: DashboardData;
+  comments: Comment[];
+  exports: Record<ExportType, { filename: string; rows: (string | number)[][] }>;
+};
+
+const SNAPSHOTS: Record<string, Snapshot> = { "market-hill": marketHill as unknown as Snapshot };
+
+export function isDemo(): boolean {
+  return !process.env.WP_API_URL;
+}
+
+/** A line for the screens to show when the data is the saved demo copy. */
+export function demoNote(): string | null {
+  return isDemo()
+    ? "Demo copy of the example results. Moderation changes are not kept, and date filters only change the timeline."
+    : null;
+}
+
+function snapshot(site: string): Snapshot {
+  const saved = SNAPSHOTS[sitePath(site)];
+  if (!saved) throw new WordPressError("This scheme has no demo results.", 404);
+  return saved;
+}
+
+/* Moderation changes made in demo mode, kept in memory for this server instance. */
+const demoComments = new Map<string, Comment[]>();
+function demoCommentList(site: string): Comment[] {
+  if (!demoComments.has(site)) demoComments.set(site, structuredClone(snapshot(site).comments));
+  return demoComments.get(site)!;
+}
 
 export class WordPressError extends Error {
   constructor(
@@ -77,11 +117,18 @@ async function call<T>(site: string, path: string, init: RequestInit = {}, query
   return (await response.json()) as T;
 }
 
-export function getDashboard(site: string, range: Range = {}): Promise<DashboardData> {
+export async function getDashboard(site: string, range: Range = {}): Promise<DashboardData> {
+  if (isDemo()) {
+    const data = structuredClone(snapshot(site).dashboard);
+    const { from, to } = cleanRange(range);
+    data.timeline = data.timeline.filter((p) => (!from || p.date >= from) && (!to || p.date <= to));
+    return data;
+  }
   return call<DashboardData>(site, "/dashboard", {}, range);
 }
 
-export function getComments(site: string, status: Comment["status"] | "all"): Promise<Comment[]> {
+export async function getComments(site: string, status: Comment["status"] | "all"): Promise<Comment[]> {
+  if (isDemo()) return demoCommentList(site).filter((c) => status === "all" || c.status === status);
   return call<Comment[]>(site, `/comments?status=${status}`);
 }
 
@@ -90,6 +137,16 @@ export function moderateComment(
   id: number,
   change: { status?: Comment["status"]; theme?: string },
 ): Promise<{ ok: true }> {
+  if (isDemo()) {
+    const comment = demoCommentList(site).find((c) => c.id === Math.trunc(id));
+    if (!comment) throw new WordPressError("That comment no longer exists.", 404);
+    if (change.status) comment.status = change.status;
+    if (change.theme !== undefined) {
+      comment.theme = change.theme;
+      comment.themeLabel = snapshot(site).dashboard.themeLabels[change.theme] ?? "";
+    }
+    return Promise.resolve({ ok: true as const });
+  }
   return call<{ ok: true }>(site, `/comments/${Math.trunc(id)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -102,6 +159,7 @@ export function getExport(
   type: ExportType,
   range: Range = {},
 ): Promise<{ filename: string; rows: (string | number)[][] }> {
+  if (isDemo()) return Promise.resolve(structuredClone(snapshot(site).exports[type]));
   return call(site, `/export/${type}`, {}, range);
 }
 
@@ -115,6 +173,9 @@ export type UploadedMedia = { id: number; url: string; size: number; type: strin
  * Checks on type and size happen in the route before this is called.
  */
 export async function uploadMedia(site: string | undefined, file: { name: string; type: string; bytes: ArrayBuffer }): Promise<UploadedMedia> {
+  if (isDemo()) {
+    throw new WordPressError("Uploads are off in this demo copy. Use a link to the image or file instead.", 503);
+  }
   const { url, auth } = config();
   const base = site ? `${url}/${sitePath(site)}` : url;
 

@@ -5,7 +5,7 @@ import { SiteNav } from "@/components/dashboard/site-nav";
 import { WordPressNotice } from "@/components/dashboard/wordpress-notice";
 import { getSession } from "@/lib/auth";
 import { getSite } from "@/lib/sites";
-import { WordPressError, getComments, getDashboard } from "@/lib/wordpress";
+import { WordPressError, demoNote, getComments, getDashboard } from "@/lib/wordpress";
 
 export const instant = false;
 
@@ -33,7 +33,7 @@ export default async function ModeratePage({ params }: { params: Promise<{ id: s
       </TopBar>
       <main className="min-h-[calc(100svh-3.5rem)] bg-paper">
         {loaded ? (
-          <Moderation siteId={site.id} name={loaded.name} initial={loaded.comments} themeLabels={loaded.themeLabels} />
+          <Moderation siteId={site.id} name={loaded.name} initial={loaded.comments} themeLabels={loaded.themeLabels} note={demoNote()} />
         ) : (
           <WordPressNotice message={error ?? ""} />
         )}

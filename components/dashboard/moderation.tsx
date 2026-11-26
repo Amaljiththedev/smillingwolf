@@ -50,11 +50,13 @@ export function Moderation({
   name,
   initial,
   themeLabels,
+  note,
 }: {
   siteId: string;
   name: string;
   initial: Comment[];
   themeLabels: Record<string, string>;
+  note?: string | null;
 }) {
   const [comments, setComments] = useState(initial);
   const [tab, setTab] = useState<Comment["status"]>("pending");
@@ -142,6 +144,12 @@ export function Moderation({
           Comments on the plan appear on the scheme site once approved. Check each one, fix its theme if needed, then
           approve or reject it.
         </p>
+        {note && (
+          <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-ink/10 bg-white px-3 py-1 text-[0.78rem] text-ink/65">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-yellow ring-1 ring-ink/20" />
+            {note}
+          </p>
+        )}
       </Reveal>
 
       {/* Status: three cards that double as tabs */}

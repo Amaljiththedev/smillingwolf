@@ -23,6 +23,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return new Response("WordPress is unavailable.", { status: 502 });
   }
 
+  /* Demo copy: the drawings are saved in public/demo on this app. */
+  if (source?.startsWith("/demo/")) return Response.redirect(new URL(source, _request.url), 302);
+
   /* Only ever fetch from the configured WordPress host. */
   const allowed = new URL(process.env.WP_API_URL ?? "http://invalid").origin;
   if (!source || new URL(source, allowed).origin !== allowed) return new Response("Not found.", { status: 404 });
