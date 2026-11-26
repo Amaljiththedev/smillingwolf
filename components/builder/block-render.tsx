@@ -34,6 +34,7 @@ import type { Block } from "@/lib/sites";
 import { LiveMap, glass, type Corners } from "@/components/map/live-map";
 import { demoPins, pad, planBounds, type Bounds } from "@/lib/geo";
 import { layerImage, planCorners, planId, readPlan } from "@/lib/svg-plan";
+import { DEFAULT_CENTRE, LINE_SETS, outlineBounds, readSite, siteCentre } from "@/lib/site-map";
 import { isBasemap } from "@/lib/map-styles";
 import { cn } from "@/lib/utils";
 
@@ -807,16 +808,17 @@ function Contact({ props, accent }: BlockProps) {
 
 /* ---------- Engagement ---------- */
 
-/* Default spot for a new map block until the client sets the scheme location. */
-const DEMO_CENTRE: [number, number] = [53.4084, -2.1494];
 
 /* A real street map with comment pins. Still in the editor so dragging the page never pans it.
    With a layered masterplan, the drawing sits on the map at its OS grid references and each
    layer gets a switch. Without grid references it is shown at the scheme's centre. */
 function MapBlock({ props, accent, editing }: BlockProps) {
+  const site = readSite(props.site);
+  const siteAt = siteCentre(site) ?? DEFAULT_CENTRE;
+  const outline = site?.outline.length ? site.outline : undefined;
   const plan = readPlan(props.plan);
   const corners: Corners | null = plan ? planCorners(plan) : null;
-  const footprint: Bounds | null = corners
+  const planBox: Bounds | null = corners
     ? {
         west: Math.min(...corners.map((c) => c[0])),
         east: Math.max(...corners.map((c) => c[0])),
@@ -824,11 +826,22 @@ function MapBlock({ props, accent, editing }: BlockProps) {
         north: Math.max(...corners.map((c) => c[1])),
       }
     : plan
-      ? planBounds(DEMO_CENTRE, plan.width, plan.height, 400)
+      ? planBounds(siteAt, plan.width, plan.height, 400)
       : null;
+  /* What the map frames: the site boundary and the plan together. */
+  const siteBox = outline ? outlineBounds(outline) : null;
+  const footprint: Bounds | null =
+    planBox && siteBox
+      ? {
+          west: Math.min(planBox.west, siteBox.west),
+          east: Math.max(planBox.east, siteBox.east),
+          south: Math.min(planBox.south, siteBox.south),
+          north: Math.max(planBox.north, siteBox.north),
+        }
+      : (planBox ?? siteBox);
   const centre: [number, number] = footprint
     ? [(footprint.north + footprint.south) / 2, (footprint.east + footprint.west) / 2]
-    : DEMO_CENTRE;
+    : siteAt;
 
   /* Visitors' own layer choices, on top of the defaults set in the editor. */
   const [switched, setSwitched] = useState<Record<string, boolean>>({});
@@ -840,15 +853,26 @@ function MapBlock({ props, accent, editing }: BlockProps) {
   const pins = demoPins(centre, pinCount);
   const reach = readText(props, "reach", "site") === "wide" ? "wide" : "site";
 
+  /* Everything a visitor can switch: the plan's layers, then the lines from the map data. */
+  const switches = [
+    ...(plan?.layers.map((layer) => ({ id: layer.key, label: layer.label, on: isOn(layer.key, layer.on) })) ?? []),
+    ...(site
+      ? LINE_SETS.filter((set) => site.lines.includes(set.key)).map((set) => ({ id: `lines:${set.key}`, label: set.label, on: isOn(`lines:${set.key}`, true) }))
+      : []),
+  ];
+  const lines = site
+    ? Object.fromEntries(site.lines.map((key) => [key, isOn(`lines:${key}`, true)]))
+    : undefined;
+
   const overlay =
-    plan && footprint
+    plan && planBox
       ? {
           images: plan.layers.map((layer) => ({
             key: `${id}-${layer.key}`,
             url: layerImage(plan, layer.key),
             visible: isOn(layer.key, layer.on),
           })),
-          bounds: footprint,
+          bounds: planBox ?? footprint,
           aspect: plan.height / plan.width,
           corners: corners ?? undefined,
         }
@@ -860,13 +884,15 @@ function MapBlock({ props, accent, editing }: BlockProps) {
         <Heading>{readText(props, "title")}</Heading>
         <LiveMap
           /* A new plan or a new position starts a fresh map, framed on the plan. */
-          key={`${id}|${corners ? `${corners[0].join()}|${corners[2].join()}` : "unplaced"}`}
+          key={`${id}|${corners ? `${corners[0].join()}|${corners[2].join()}` : "unplaced"}|${footprint ? [footprint.west, footprint.north].join() : siteAt.join()}`}
           still={editing}
           centre={centre}
           zoom={16.2}
           pins={pins}
           overlay={overlay}
           overlayOpacity={0.92}
+          outline={outline}
+          lines={lines}
           fit={footprint ? pad(footprint, 0.08) : undefined}
           reach={reach}
           basemap={isBasemap(props.basemap) ? props.basemap : "streets"}
@@ -882,7 +908,7 @@ function MapBlock({ props, accent, editing }: BlockProps) {
             </div>
           )}
 
-          {plan && plan.layers.length > 1 && (
+          {switches.length > 1 && (
             <div className={cn(glass, "absolute bottom-3 left-3 z-10 max-w-[calc(100%-1.5rem)] @lg:max-w-[16rem]")}>
               <button
                 type="button"
@@ -896,16 +922,16 @@ function MapBlock({ props, accent, editing }: BlockProps) {
                 }}
                 className="flex w-full items-center justify-between gap-3 px-3 py-2 text-[0.72rem] font-medium uppercase tracking-[0.08em] text-ink/70 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink"
               >
-                Plan layers
+                {plan ? "Plan layers" : "Map layers"}
                 <span aria-hidden="true" className={cn("transition-transform duration-200", layersOpen === null ? "@max-lg:-rotate-90" : !layersOpen && "-rotate-90")}>
                   ▾
                 </span>
               </button>
               <ul className={cn("max-h-[11rem] flex-col gap-0.5 overflow-y-auto px-1.5 pb-1.5", layersOpen === null ? "hidden @lg:flex" : layersOpen ? "flex" : "hidden")}>
-                {plan.layers.map((layer) => {
-                  const on = isOn(layer.key, layer.on);
+                {switches.map((layer) => {
+                  const on = layer.on;
                   return (
-                    <li key={layer.key}>
+                    <li key={layer.id}>
                       <button
                         type="button"
                         role="switch"
@@ -914,7 +940,7 @@ function MapBlock({ props, accent, editing }: BlockProps) {
                         onClick={(event) => {
                           if (editing) return;
                           event.stopPropagation();
-                          setSwitched((all) => ({ ...all, [`${id}:${layer.key}`]: !on }));
+                          setSwitched((all) => ({ ...all, [`${id}:${layer.id}`]: !on }));
                         }}
                         className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left text-[0.78rem] text-ink transition-colors hover:bg-white/70 focus-visible:outline-2 focus-visible:outline-ink"
                       >

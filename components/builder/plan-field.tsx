@@ -332,7 +332,7 @@ function PlacementStatus({ plan }: { plan: SvgPlan }) {
   return <p className="text-[0.72rem] leading-snug text-ink/50">Not placed yet, so the plan is shown at the scheme&apos;s centre.</p>;
 }
 
-function GridInput({
+export function GridInput({
   id,
   label,
   value,

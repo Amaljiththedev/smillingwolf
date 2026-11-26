@@ -6,7 +6,10 @@ import { Box, Compass, Locate, Map as MapIcon, Minus, Mountain, Plus, Satellite 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Bounds } from "@/lib/geo";
 import { BASEMAPS, DEM, buildStyle, type Basemap } from "@/lib/map-styles";
+import { lineLayers, type LineKey } from "@/lib/site-map";
 import { cn } from "@/lib/utils";
+
+const DRAW_ORDER: LineKey[] = ["green", "water", "roads", "buildings", "paths"];
 
 /*
   A real map (MapLibre, open source) with satellite, street and terrain base
@@ -95,6 +98,8 @@ export function LiveMap({
   zoom = 16,
   pins,
   area,
+  outline,
+  lines,
   labels = [],
   overlay,
   overlayOpacity = 0.9,
@@ -117,6 +122,10 @@ export function LiveMap({
   zoom?: number;
   pins: Pin[];
   area?: Bounds;
+  /** The site boundary as [lng, lat] points; drawn instead of the area box. */
+  outline?: [number, number][];
+  /** Lines drawn from the map data (paths, roads, buildings...), and whether each shows. */
+  lines?: Partial<Record<LineKey, boolean>>;
   labels?: MapLabel[];
   overlay?: { images: OverlayImage[]; bounds: Bounds; aspect: number; corners?: Corners };
   overlayOpacity?: number;
@@ -322,14 +331,21 @@ export function LiveMap({
      dashed line on top of everything so roads and buildings never hide it. */
   useEffect(() => {
     const map = mapRef.current;
-    if (!ready || !map || !area || !styleReady.current) return;
-    const ring = [
-      [area.west, area.north],
-      [area.east, area.north],
-      [area.east, area.south],
-      [area.west, area.south],
-      [area.west, area.north],
-    ];
+    if (!ready || !map || !styleReady.current) return;
+    if (!area && !outline?.length) {
+      for (const id of ["op-area-line", "op-area-casing", "op-area-fill"]) if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource("op-area")) map.removeSource("op-area");
+      return;
+    }
+    const ring = outline?.length
+      ? [...outline, outline[0]]
+      : [
+          [area!.west, area!.north],
+          [area!.east, area!.north],
+          [area!.east, area!.south],
+          [area!.west, area!.south],
+          [area!.west, area!.north],
+        ];
     const data = {
       type: "Feature" as const,
       properties: {},
@@ -354,7 +370,36 @@ export function LiveMap({
         paint: { "line-color": "#ff6b66", "line-width": 2.2, "line-dasharray": [2.2, 1.6] },
       },
     );
-  }, [ready, styleVersion, area]);
+    // outline is compared by content: a fresh array each render must not redraw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, styleVersion, area, JSON.stringify(outline ?? null)]);
+
+  /* Lines drawn from the map data, over the base map and under the plan drawing and names. */
+  const linesKey = JSON.stringify(lines ?? null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !styleReady.current || !map.getSource("openmaptiles")) return;
+    /* Bottom to top: green and water, then roads, buildings, and paths on top. */
+    for (const key of DRAW_ORDER) {
+      const show = lines?.[key];
+      const layers = lineLayers(key);
+      if (show === undefined) {
+        for (const layer of layers) if (map.getLayer(layer.id)) map.removeLayer(layer.id);
+        continue;
+      }
+      for (const layer of layers) {
+        if (!map.getLayer(layer.id)) {
+          const before =
+            map.getStyle().layers?.find((l) => l.id.startsWith("overlay-"))?.id ??
+            (map.getLayer("op-area-fill") ? "op-area-fill" : firstLabelLayer(map));
+          map.addLayer(layer, before);
+        }
+        map.setLayoutProperty(layer.id, "visibility", show ? "visible" : "none");
+      }
+    }
+    // linesKey stands for lines.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, styleVersion, linesKey]);
 
   /* Plan drawings laid on the ground, under the street names. */
   useEffect(() => {
