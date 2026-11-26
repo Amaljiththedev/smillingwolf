@@ -710,7 +710,7 @@ function BlockFields({
             )}
 
             {field.type === "svgplan" && (
-              <PlanField value={readPlan(block.props[field.key])} onChange={(next) => onUpdate(field.key, next)} />
+              <PlanField value={readPlan(block.props[field.key])} onChange={(next) => onUpdate(field.key, next)} siteId={siteId} />
             )}
 
             {field.type === "items" && (

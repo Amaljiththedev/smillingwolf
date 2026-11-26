@@ -396,7 +396,8 @@ export function LiveMap({
         if (!existing) {
           let url: string;
           try {
-            url = await rasterise(image.url, overlay.aspect);
+            /* SVG drawings are drawn to PNG first; photos and WebP layers go straight on. */
+            url = /^data:image\/svg|\.svg(\?|#|$)/i.test(image.url) ? await rasterise(image.url, overlay.aspect) : image.url;
           } catch {
             continue;
           }
