@@ -134,3 +134,98 @@ svg {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Map comment pins (components/map/live-map.tsx). The marker element is
+   positioned by MapLibre with transform, so the dot itself is ::before. */
+.op-pin {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.op-pin::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 4px;
+  border-radius: 999px;
+  background: var(--sw-ink);
+  border: 2.5px solid #fff;
+  box-shadow: 0 3px 10px -2px rgba(19, 23, 19, 0.45);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms;
+  animation: op-pin-in 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: var(--pin-delay, 0ms);
+}
+.op-pin[data-tone="neg"]::before { background: var(--sw-coral); }
+.op-pin[data-tone="pos"]::before { background: var(--sw-olive); }
+.op-pin:hover::before,
+.op-pin[data-active="true"]::before {
+  transform: scale(1.45);
+  box-shadow: 0 0 0 4px rgba(19, 23, 19, 0.18), 0 6px 16px -4px rgba(19, 23, 19, 0.5);
+}
+.op-pin[data-active="true"] { z-index: 5; }
+.op-pin:focus-visible { outline: none; }
+.op-pin:focus-visible::before { box-shadow: 0 0 0 3px var(--sw-ink); }
+@keyframes op-pin-in {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+}
+
+
+/* The "hold Ctrl to zoom" hint over maps, in the product's type */
+.maplibregl-cooperative-gesture-screen {
+  background: rgb(19 23 19 / 0.42);
+  backdrop-filter: blur(2px);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+/* ---------- Page blocks: settings from the Style panel ---------- */
+
+/* Vertical breathing room. Phones get less than wider screens. */
+.op-block { --block-py: 2.5rem; }
+.op-block[data-spacing="compact"] { --block-py: 1.5rem; }
+.op-block[data-spacing="roomy"] { --block-py: 4rem; }
+@container (min-width: 48rem) {
+  .op-block { --block-py: 3.5rem; }
+  .op-block[data-spacing="compact"] { --block-py: 2rem; }
+  .op-block[data-spacing="roomy"] { --block-py: 6rem; }
+}
+
+/* Centred text */
+.op-block[data-align="center"] { text-align: center; }
+.op-block[data-align="center"] :is(h1, h2, h3, p, blockquote, dl, ol, ul) { margin-inline: auto; }
+.op-block[data-align="center"] :is(figcaption, li.flex, label) { justify-content: center; }
+
+/* Per-device visibility. Breakpoints match the blocks' own (@lg 32rem, @3xl 48rem). */
+@container (max-width: 31.99rem) {
+  .op-block[data-hide~="phone"] { display: none; }
+  .op-block[data-faded~="phone"] { opacity: 0.35; }
+}
+@container (min-width: 32rem) and (max-width: 47.99rem) {
+  .op-block[data-hide~="tablet"] { display: none; }
+  .op-block[data-faded~="tablet"] { opacity: 0.35; }
+}
+@container (min-width: 48rem) {
+  .op-block[data-hide~="desktop"] { display: none; }
+  .op-block[data-faded~="desktop"] { opacity: 0.35; }
+}
+
+/* ---------- Page themes (lib/themes.ts) ---------- */
+
+/* The theme sets its body face on the page wrapper; headings get the display face. */
+.op-page { font-family: var(--font-display); }
+.op-page :is(h1, h2, h3, blockquote) { font-family: var(--t-heading, inherit); }
+
+/* Text on accent-coloured surfaces flips dark or light so it stays readable. */
+.op-page [style*="background-color: var(--t-accent)"] { --sw-ink: var(--t-accent-ink); }
+.op-page [style*="background-color: var(--t-accent-2)"] { --sw-ink: var(--t-accent-2-ink); }

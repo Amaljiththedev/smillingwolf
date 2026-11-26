@@ -12,15 +12,17 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import Link from "next/link";
-import { ArrowLeft, Check } from "lucide-react";
+import { Check, Plus, SlidersHorizontal } from "lucide-react";
+import { SiteNav } from "@/components/dashboard/site-nav";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Canvas } from "@/components/builder/canvas";
 import { Inspector } from "@/components/builder/inspector";
 import { Palette } from "@/components/builder/palette";
 import { TopBar } from "@/components/builder/top-bar";
+import { Tour, useTourSeen } from "@/components/builder/tour";
 import { definitionFor } from "@/lib/blocks";
-import { editorReducer, initialState, isEditorState } from "@/lib/editor";
+import { editorReducer, initialState } from "@/lib/editor";
+import { readSaved, writeSaved } from "@/lib/page-store";
 import type { Session } from "@/lib/session";
 import type { BlockKind, Site } from "@/lib/sites";
 import { cn } from "@/lib/utils";
@@ -38,22 +40,30 @@ export function Editor({ site, session }: { site: Site; session: Session }) {
   const [state, dispatch] = useReducer(editorReducer, site, initialState);
   const [draggingKind, setDraggingKind] = useState<BlockKind | null>(null);
 
-  const storageKey = `openplan:site:${site.id}`;
+  /* Which panel is open as a sheet on screens too narrow for the side panels. */
+  const [sheet, setSheet] = useState<"palette" | "inspector" | null>(null);
+
+  /* Guided tour: opens by itself the first time this user opens the builder, and from the Tour button after that. */
+  const tourSeen = useTourSeen(session.email);
+  const [tourAgain, setTourAgain] = useState(false);
+  const tourOpen = tourAgain || !tourSeen.seen;
+  function startTour() {
+    setSheet(null);
+    /* Page settings (with the themes) show when nothing is selected. */
+    dispatch({ type: "select", id: null });
+    setTourAgain(true);
+  }
+  function endTour() {
+    tourSeen.markSeen();
+    setTourAgain(false);
+  }
 
   /* Read the saved draft once, after mount, so the server copy and the first
      client render agree and hydration stays clean. */
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(storageKey);
-      if (!saved) return;
-      const parsed: unknown = JSON.parse(saved);
-      if (isEditorState(parsed)) {
-        dispatch({ type: "replace", state: { ...parsed, selectedId: null } });
-      }
-    } catch {
-      /* Corrupt or unavailable storage just means we start from the server copy. */
-    }
-  }, [storageKey]);
+    const saved = readSaved(site.id);
+    if (saved) dispatch({ type: "replace", state: saved });
+  }, [site.id]);
 
   /* Skip the very first run: on mount this effect would still be holding the
      pre-restore state, and writing it would clobber the saved draft. */
@@ -63,20 +73,15 @@ export function Editor({ site, session }: { site: Site; session: Session }) {
       savedOnce.current = true;
       return;
     }
-    try {
-      window.localStorage.setItem(
-        storageKey,
-        JSON.stringify({ blocks: state.blocks, accent: state.accent, selectedId: null }),
-      );
-    } catch {
-      /* Out of quota or blocked – editing still works, it just will not persist. */
-    }
-  }, [state.blocks, state.accent, storageKey]);
+    writeSaved(site.id, state);
+  }, [state, site.id]);
 
   const sensors = useSensors(
     /* A small threshold so a click selects a block and a drag moves it. */
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   const selected = useMemo(
@@ -84,14 +89,54 @@ export function Editor({ site, session }: { site: Site; session: Session }) {
     [state.blocks, state.selectedId],
   );
 
-  const usedKinds = useMemo(() => new Set(state.blocks.map((block) => block.kind)), [state.blocks]);
+  const selectedIndex = selected ? state.blocks.indexOf(selected) : -1;
+  const position = { index: selectedIndex, count: state.blocks.length };
+
+  function moveBlock(id: string, step: -1 | 1) {
+    const from = state.blocks.findIndex((block) => block.id === id);
+    if (from === -1) return;
+    dispatch({ type: "move", from, to: from + step });
+  }
+
+  /* Alt + Up / Down moves the selected block, wherever focus is (except text fields). */
+  const moveSelected = useRef<(step: -1 | 1) => void>(() => {});
+  useEffect(() => {
+    moveSelected.current = (step) => {
+      if (state.selectedId) moveBlock(state.selectedId, step);
+    };
+  });
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (
+        !event.altKey ||
+        (event.key !== "ArrowUp" && event.key !== "ArrowDown")
+      )
+        return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("input, textarea, select, [contenteditable]")
+      )
+        return;
+      event.preventDefault();
+      moveSelected.current(event.key === "ArrowUp" ? -1 : 1);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const usedKinds = useMemo(
+    () => new Set(state.blocks.map((block) => block.kind)),
+    [state.blocks],
+  );
 
   function onDragStart(event: DragStartEvent) {
     const data = event.active.data.current;
     setDraggingKind(
       data?.from === "palette"
         ? (data.kind as BlockKind)
-        : (state.blocks.find((block) => block.id === event.active.id)?.kind ?? null),
+        : (state.blocks.find((block) => block.id === event.active.id)?.kind ??
+            null),
     );
   }
 
@@ -106,7 +151,11 @@ export function Editor({ site, session }: { site: Site; session: Session }) {
       const kind = active.data.current.kind as BlockKind | undefined;
       if (!kind) return;
       const at = state.blocks.findIndex((block) => block.id === over.id);
-      dispatch({ type: "insert", kind, index: at === -1 ? state.blocks.length : at });
+      dispatch({
+        type: "insert",
+        kind,
+        index: at === -1 ? state.blocks.length : at,
+      });
       return;
     }
 
@@ -120,6 +169,8 @@ export function Editor({ site, session }: { site: Site; session: Session }) {
 
   return (
     <DndContext
+      /* A fixed id keeps dnd-kit's accessibility ids the same on server and client. */
+      id="openplan-builder"
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragStart={onDragStart}
@@ -127,59 +178,159 @@ export function Editor({ site, session }: { site: Site; session: Session }) {
       onDragCancel={() => setDraggingKind(null)}
     >
       <TopBar session={session}>
-        <div className="flex min-w-0 items-center gap-3">
-          <Link
-            href="/builder"
-            className="inline-flex shrink-0 items-center gap-1.5 text-[0.85rem] text-ink/65 transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-          >
-            <ArrowLeft className="size-3.5" aria-hidden="true" />
-            <span className="hidden sm:inline">Sites</span>
-          </Link>
-          <span aria-hidden="true" className="h-4 w-px shrink-0 bg-ink/15" />
-          <span className="truncate text-[0.9rem] font-medium text-ink">{site.name}</span>
-          <span
-            className={cn(
-              "hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 md:inline-flex",
-              "font-mono text-[0.55rem] uppercase tracking-[0.1em] text-ink/55",
-            )}
-          >
-            <Check className="size-3" aria-hidden="true" />
-            Saved in this browser
-          </span>
-        </div>
+        <SiteNav
+          site={site}
+          extra={
+            <span
+              title="Saved in this browser"
+              className={cn(
+                "hidden shrink-0 items-center gap-1 rounded-full bg-lime/60 px-2 py-0.5 lg:inline-flex",
+                "text-[0.72rem] text-ink/70",
+              )}
+            >
+              <Check className="size-3" aria-hidden="true" />
+              Saved
+            </span>
+          }
+        />
       </TopBar>
 
       <div className="flex h-[calc(100svh-3.5rem)] min-h-0">
-        <aside className="hidden w-56 shrink-0 border-r border-ink/10 bg-white md:block">
+        <aside
+          data-tour="palette"
+          className="hidden w-60 shrink-0 border-r border-ink/10 bg-white md:block"
+        >
           <Palette
             usedKinds={usedKinds}
-            onAdd={(kind) => dispatch({ type: "insert", kind, index: state.blocks.length })}
+            onAdd={(kind) =>
+              dispatch({ type: "insert", kind, index: state.blocks.length })
+            }
           />
         </aside>
 
-        <main className="min-w-0 flex-1">
+        <main data-tour="canvas" className="min-w-0 flex-1">
           <Canvas
+            siteId={site.id}
             blocks={state.blocks}
             accent={state.accent}
+            theme={state.theme}
             selectedId={state.selectedId}
-            onSelect={(id) => dispatch({ type: "select", id })}
+            onSelect={(id) => {
+              dispatch({ type: "select", id });
+              /* On narrower screens the inspector is a sheet; open it on select. */
+              if (id && window.matchMedia("(max-width: 1023px)").matches)
+                setSheet("inspector");
+            }}
             onDuplicate={(id) => dispatch({ type: "duplicate", id })}
             onRemove={(id) => dispatch({ type: "remove", id })}
+            onMove={moveBlock}
+            onTour={startTour}
           />
         </main>
 
-        <aside className="hidden w-72 shrink-0 border-l border-ink/10 bg-white lg:block">
+        <aside
+          data-tour="inspector"
+          className="hidden w-80 shrink-0 border-l border-ink/10 bg-white lg:block"
+        >
           <Inspector
             block={selected}
             accent={state.accent}
+            theme={state.theme}
+            onTheme={(id) => dispatch({ type: "theme", id })}
+            siteId={site.id}
+            position={position}
+            onMove={(step) => selected && moveBlock(selected.id, step)}
             onUpdate={(key, value) =>
-              selected && dispatch({ type: "update", id: selected.id, key, value })
+              selected &&
+              dispatch({ type: "update", id: selected.id, key, value })
             }
             onAccent={(value) => dispatch({ type: "accent", value })}
             onClearSelection={() => dispatch({ type: "select", id: null })}
           />
         </aside>
       </div>
+
+      {/* Narrow screens: the palette and inspector open as bottom sheets */}
+      <div className="fixed inset-x-0 bottom-4 z-40 flex justify-center gap-2 lg:hidden">
+        <button
+          type="button"
+          data-tour="palette-mobile"
+          onClick={() => setSheet("palette")}
+          className="inline-flex h-10 items-center gap-1.5 rounded-full bg-ink px-4 text-[0.85rem] font-medium text-white shadow-lg md:hidden"
+        >
+          <Plus className="size-4" aria-hidden="true" />
+          Add block
+        </button>
+        <button
+          type="button"
+          data-tour="inspector-mobile"
+          onClick={() => setSheet("inspector")}
+          className="inline-flex h-10 items-center gap-1.5 rounded-full border border-ink/15 bg-white px-4 text-[0.85rem] font-medium text-ink shadow-lg"
+        >
+          <SlidersHorizontal className="size-4" aria-hidden="true" />
+          {selected
+            ? `Edit ${definitionFor(selected.kind).label.toLowerCase()}`
+            : "Page settings"}
+        </button>
+      </div>
+
+      {sheet && (
+        <div
+          className="fixed inset-0 z-50 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label={sheet === "palette" ? "Add blocks" : "Edit block"}
+        >
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setSheet(null)}
+            className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"
+          />
+          <div className="absolute inset-x-0 bottom-0 flex max-h-[78svh] flex-col overflow-hidden rounded-t-2xl bg-white shadow-[0_-20px_50px_-20px_rgba(19,23,19,0.4)]">
+            <span
+              aria-hidden="true"
+              className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-ink/15"
+            />
+            <div className="min-h-0 flex-1">
+              {sheet === "palette" ? (
+                <Palette
+                  usedKinds={usedKinds}
+                  onAdd={(kind) => {
+                    dispatch({
+                      type: "insert",
+                      kind,
+                      index: state.blocks.length,
+                    });
+                    setSheet("inspector");
+                  }}
+                />
+              ) : (
+                <Inspector
+                  block={selected}
+                  accent={state.accent}
+                  theme={state.theme}
+                  onTheme={(id) => dispatch({ type: "theme", id })}
+                  siteId={site.id}
+                  position={position}
+                  onMove={(step) => selected && moveBlock(selected.id, step)}
+                  onUpdate={(key, value) =>
+                    selected &&
+                    dispatch({ type: "update", id: selected.id, key, value })
+                  }
+                  onAccent={(value) => dispatch({ type: "accent", value })}
+                  onClearSelection={() =>
+                    dispatch({ type: "select", id: null })
+                  }
+                  onClose={() => setSheet(null)}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Tour open={tourOpen} onClose={endTour} />
 
       {/* What the cursor carries while dragging */}
       <DragOverlay dropAnimation={null}>

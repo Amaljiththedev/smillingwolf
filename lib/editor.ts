@@ -1,5 +1,6 @@
 import { newBlock } from "@/lib/blocks";
 import type { Block, BlockKind, Site } from "@/lib/sites";
+import { DEFAULT_THEME, themeById } from "@/lib/themes";
 
 /*
   Editor state and the reducer that drives it. Kept out of the components so
@@ -22,6 +23,8 @@ export type EditorState = {
   blocks: Block[];
   selectedId: string | null;
   accent: string;
+  /** Page theme id (lib/themes.ts). */
+  theme: string;
 };
 
 export type EditorAction =
@@ -32,10 +35,11 @@ export type EditorAction =
   | { type: "update"; id: string; key: string; value: unknown }
   | { type: "select"; id: string | null }
   | { type: "accent"; value: string }
+  | { type: "theme"; id: string }
   | { type: "replace"; state: EditorState };
 
 export function initialState(site: Site): EditorState {
-  return { blocks: site.blocks, selectedId: null, accent: site.brand.accent };
+  return { blocks: site.blocks, selectedId: null, accent: site.brand.accent, theme: DEFAULT_THEME.id };
 }
 
 function clamp(index: number, length: number): number {
@@ -99,13 +103,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "accent":
       return { ...state, accent: action.value };
 
+    case "theme": {
+      /* A theme brings its own accent; the brand colour can be changed again afterwards. */
+      const theme = themeById(action.id);
+      return { ...state, theme: theme.id, accent: theme.colors.accent };
+    }
+
     case "replace":
       return action.state;
   }
 }
 
-/** Shape check for state restored from storage, which may be stale or hand-edited. */
-export function isEditorState(value: unknown): value is EditorState {
+/** Shape check for state restored from storage, which may be stale or hand-edited.
+    Drafts saved before themes existed have no theme; callers default it. */
+export function isEditorState(value: unknown): value is Omit<EditorState, "theme"> & { theme?: unknown } {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<EditorState>;
   return (

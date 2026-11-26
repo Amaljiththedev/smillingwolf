@@ -16,7 +16,7 @@ export function TopBar({ session, children }: { session: Session; children?: Rea
         <span className="text-[1.05rem] font-medium tracking-[-0.01em] text-ink">
           {PRODUCT.name}
         </span>
-        <span className="hidden font-mono text-[0.6rem] uppercase tracking-[0.1em] text-ink/50 sm:inline">
+        <span className="hidden font-mono text-[0.6rem] uppercase tracking-[0.1em] text-ink/50 2xl:inline">
           by {PRODUCT.maker}
         </span>
       </Link>
