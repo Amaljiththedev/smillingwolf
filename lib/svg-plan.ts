@@ -156,7 +156,8 @@ function open(text: string) {
     const style = (group.getAttribute("style") ?? "").replace(/display\s*:\s*none;?/g, "").trim();
     if (style) group.setAttribute("style", style);
     else group.removeAttribute("style");
-    return { key, label: layerName(group, index), on: !hiddenInFile };
+    const label = layerName(group, index);
+    return { key, label, on: !hiddenInFile && !BACKDROP.test(label) };
   });
 
   /* Pixel size from the viewBox, so the drawing keeps its shape when drawn as an image. */
@@ -166,6 +167,13 @@ function open(text: string) {
 
   return { svg, groups, layers, dims };
 }
+
+/*
+  The architects' own backdrop (an aerial photo or a base map) starts switched
+  off: the live map underneath already shows the ground. It stays a layer, so
+  the editor or visitors can still turn it on.
+*/
+const BACKDROP = /\b(background|backdrop|aerial|satellite|ortho\w*|photo|base ?map|context)\b/i;
 
 function blankPlan(name: string, width: number, height: number, layers: PlanLayer[]): Omit<SvgPlan, "svg"> {
   return { name, width, height, layers, placement: "points", points: [null, null], sw: "", ne: "" };

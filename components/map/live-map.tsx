@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MapLibreMap, Marker } from "maplibre-gl";
-import { Box, Compass, Locate, Map as MapIcon, Minus, Mountain, Plus } from "lucide-react";
+import { Box, Compass, Locate, Map as MapIcon, Minus, Mountain, Plus, Satellite } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Bounds } from "@/lib/geo";
 import { BASEMAPS, DEM, buildStyle, type Basemap } from "@/lib/map-styles";
@@ -31,7 +31,7 @@ export type MapLabel = { key: string; lng: number; lat: number; text: string };
 export const glass =
   "rounded-xl border border-white/50 bg-white/65 shadow-[0_10px_34px_-14px_rgba(19,23,19,0.5)] backdrop-blur-xl backdrop-saturate-150";
 
-const BASEMAP_ICONS = { streets: MapIcon, terrain: Mountain } as const;
+const BASEMAP_ICONS = { streets: MapIcon, terrain: Mountain, aerial: Satellite } as const;
 
 /*
   Keeping the map on the site.

@@ -21,6 +21,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { hasAerial } from "@/lib/map-styles";
 import type { Block, BlockKind } from "@/lib/sites";
 
 /*
@@ -597,6 +598,7 @@ export const BLOCK_DEFINITIONS: readonly BlockDefinition[] = [
         options: [
           { value: "streets", label: "Streets" },
           { value: "terrain", label: "Terrain" },
+          ...(hasAerial ? [{ value: "aerial", label: "Aerial, soft" }] : []),
         ],
       },
       {
